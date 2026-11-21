@@ -92,6 +92,13 @@ export function App() {
     setAccounts(dataset.accounts);
     setUiSettings(dataset.uiSettings);
     setGroupNotes(dataset.groupNotes);
+    if (dataset.weeks.length > 0) {
+      setSelectedWeek((prev) => {
+        const exists = dataset.weeks.some((w) => w.weekNumber === prev);
+        if (exists) return prev;
+        return dataset.weeks[dataset.weeks.length - 1].weekNumber;
+      });
+    }
   }, []);
 
   // Tự động đồng bộ từ Supabase (nếu có cấu hình env) & lắng nghe Realtime / Storage sync
@@ -285,20 +292,6 @@ export function App() {
     setGroupNotes(updated);
   };
 
-  const handleResetSeed = () => {
-    const resetData = dataService.resetToSeedData();
-    setMembers(resetData.members);
-    setWeeks(resetData.weeks);
-    setLogs(resetData.logs);
-    setAccounts(resetData.accounts);
-    setUiSettings(resetData.uiSettings);
-    setGroupNotes(resetData.groupNotes);
-    const latest = resetData.weeks[resetData.weeks.length - 1];
-    if (latest) {
-      setSelectedWeek(latest.weekNumber);
-    }
-  };
-
   if (isPresentationMode && canUsePresentation) {
     return (
       <div className="min-h-screen bg-canvas text-slate-900">
@@ -440,7 +433,6 @@ export function App() {
               onSaveWeek={handleSaveWeek}
               onUpdateAccountPassword={handleUpdateAccountPassword}
               onSaveUiSettings={handleSaveUiSettings}
-              onResetSeed={handleResetSeed}
               onNotify={notify}
             />
           )}
@@ -455,8 +447,6 @@ export function App() {
 
       <LoginModal
         isOpen={isLoginModalOpen}
-        accounts={accounts}
-        groupNames={uiSettings.groupNames}
         onClose={() => setIsLoginModalOpen(false)}
         onAuthenticate={handleAuthenticate}
         onLoginSuccess={handleLoginSuccess}

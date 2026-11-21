@@ -1,38 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Eye, EyeOff, LogIn, UserRound, X } from 'lucide-react';
-import { getGroupDisplayName, GroupId, UserAccount } from '../../types';
+import { UserAccount } from '../../types';
 
 interface LoginModalProps {
   isOpen: boolean;
-  accounts: UserAccount[];
-  groupNames: Record<GroupId, string>;
   onClose: () => void;
   onAuthenticate: (username: string, password: string) => UserAccount | null;
   onLoginSuccess: (account: UserAccount) => void;
 }
 
-function getScopeDescription(
-  account: UserAccount,
-  groupNames: Record<GroupId, string>
-): string {
-  switch (account.role) {
-    case 'admin':
-      return 'Toàn quyền 4 tab & tùy chỉnh giao diện';
-    case 'banhoctap':
-      return 'Báo cáo, Điểm sáng & chấm hộ 4 nhóm';
-    case 'group_officer': {
-      const gName = account.assignedGroup
-        ? getGroupDisplayName(account.assignedGroup, groupNames)
-        : account.displayName.replace('Cán sự ', '');
-      return `Báo cáo & chỉ chấm ${gName}`;
-    }
-  }
-}
-
 export const LoginModal: React.FC<LoginModalProps> = ({
   isOpen,
-  accounts,
-  groupNames,
   onClose,
   onAuthenticate,
   onLoginSuccess,
@@ -65,19 +43,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
     const authenticated = onAuthenticate(username, password);
     if (!authenticated) {
-      setError(
-        'Tên đăng nhập hoặc mật khẩu chưa đúng. Vui lòng kiểm tra lại hoặc dùng gợi ý bên dưới.'
-      );
+      setError('Tên đăng nhập hoặc mật khẩu chưa đúng. Vui lòng kiểm tra lại.');
       return;
     }
 
     onLoginSuccess(authenticated);
-  };
-
-  const handleQuickFill = (account: UserAccount) => {
-    setUsername(account.username);
-    setPassword(account.password);
-    setError('');
   };
 
   return (
@@ -87,7 +57,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       aria-modal="true"
       aria-labelledby="login-modal-title"
     >
-      <div className="bg-surface rounded-2xl border border-slate-200 shadow-elevated w-full max-w-xl p-5 sm:p-7 space-y-5 animate-fade-in my-auto">
+      <div className="bg-surface rounded-2xl border border-slate-200 shadow-elevated w-full max-w-md p-5 sm:p-7 space-y-5 animate-fade-in my-auto">
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -132,7 +102,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   setUsername(e.target.value);
                   if (error) setError('');
                 }}
-                placeholder="VD: admin, banhoctap, nhom1..."
+                placeholder="Nhập tên đăng nhập cán sự"
                 className="w-full min-h-[46px] pl-10 pr-4 py-2.5 rounded-xl bg-slate-50 focus:bg-surface border border-slate-200 focus:border-emerald-600 text-base font-semibold text-slate-900 placeholder:text-slate-400 placeholder:font-normal"
                 autoFocus
               />
@@ -198,34 +168,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </div>
         </form>
 
-        {/* Bảng gợi ý đăng nhập nhanh 6 tài khoản */}
-        <div className="rounded-xl bg-amber-50/70 border border-amber-200 p-4 space-y-2.5">
-          <p className="text-xs font-bold uppercase tracking-wider text-amber-900">
-            Gợi ý 6 tài khoản mẫu (bấm 1 chạm để điền nhanh)
+        <div className="pt-3 border-t border-slate-200/80 text-center">
+          <p className="text-xs font-medium text-slate-500">
+            Liên hệ Thắng nếu cần cấp lại mật khẩu.
           </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {accounts.map((acc) => (
-              <button
-                key={acc.id}
-                type="button"
-                onClick={() => handleQuickFill(acc)}
-                className="text-left px-3 py-2.5 rounded-xl bg-surface hover:bg-amber-100/60 border border-amber-200 transition-colors flex items-center justify-between gap-2"
-              >
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-slate-900 truncate">
-                    {acc.displayName}
-                  </div>
-                  <div className="text-[11px] font-medium text-slate-500 truncate mt-0.5">
-                    {getScopeDescription(acc, groupNames)}
-                  </div>
-                </div>
-                <span className="shrink-0 px-2 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold tabular-nums">
-                  {acc.username} / {acc.password}
-                </span>
-              </button>
-            ))}
-          </div>
         </div>
       </div>
     </div>

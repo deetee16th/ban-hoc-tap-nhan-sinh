@@ -46,7 +46,6 @@ interface AdminSettingsProps {
   onSaveWeek: (week: WeekConfig) => void;
   onUpdateAccountPassword: (accountId: string, newPassword: string) => void;
   onSaveUiSettings: (settings: UiSettings) => void;
-  onResetSeed: () => void;
   onNotify: (text: string, tone?: 'success' | 'info') => void;
 }
 
@@ -63,7 +62,6 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   onSaveWeek,
   onUpdateAccountPassword,
   onSaveUiSettings,
-  onResetSeed,
   onNotify,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -73,7 +71,6 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [deletingMember, setDeletingMember] = useState<Member | null>(null);
-  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
 
   // State quản lý mật khẩu tài khoản
   const [revealedAccountIds, setRevealedAccountIds] = useState<
@@ -165,14 +162,6 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     } else {
       onNotify('Trình duyệt không hỗ trợ sao chép tự động.', 'info');
     }
-  };
-
-  const handleConfirmReset = () => {
-    onResetSeed();
-    setIsResetConfirmOpen(false);
-    onNotify(
-      'Đã khôi phục dữ liệu mẫu 24 học viên, 2 tuần học & 6 tài khoản mặc định!'
-    );
   };
 
   const toggleRevealPassword = (accountId: string) => {
@@ -499,15 +488,6 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
               <ClipboardCopy className="w-5 h-5" />
               <span>Copy dữ liệu cho Google Sheets</span>
             </button>
-
-            <button
-              type="button"
-              onClick={() => setIsResetConfirmOpen(true)}
-              className="w-full min-h-[46px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-sm sm:text-base transition-colors"
-            >
-              <RotateCcw className="w-4 h-4" />
-              <span>Reset dữ liệu mẫu ban đầu</span>
-            </button>
           </div>
         </section>
       </div>
@@ -691,40 +671,6 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                 className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm"
               >
                 Xóa thành viên
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Reset Seed Confirm Modal */}
-      {isResetConfirmOpen && (
-        <div
-          className="fixed inset-0 z-50 bg-black/55 dark:bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="bg-surface rounded-2xl border border-slate-200 shadow-elevated max-w-md w-full p-6 space-y-4">
-            <h3 className="text-lg font-extrabold text-slate-900">
-              Khôi phục dữ liệu mẫu?
-            </h3>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              Thao tác này sẽ đưa toàn bộ danh sách về 24 học viên mẫu, 2 tuần học, ghi chú nhóm và 6 tài khoản mặc định (mật khẩu 123456). Các thay đổi bạn vừa nhập thủ công sẽ được thay thế.
-            </p>
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsResetConfirmOpen(false)}
-                className="px-4 py-2.5 rounded-xl border border-slate-300 bg-surface hover:bg-slate-50 font-bold text-sm text-slate-700"
-              >
-                Hủy
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmReset}
-                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm"
-              >
-                Khôi phục ngay
               </button>
             </div>
           </div>

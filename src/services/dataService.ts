@@ -61,7 +61,6 @@ export interface ILearningDataService {
     group: GroupId,
     note: string
   ): GroupPresentationNoteMap;
-  resetToSeedData(): LearningDataset;
 }
 
 const STORAGE_KEYS = {
@@ -162,23 +161,35 @@ function cloneSeedGroupNotes(): GroupPresentationNoteMap {
   return { ...SEED_GROUP_NOTES };
 }
 
-function readStorageArray<T>(key: string, fallbackFactory: () => T[]): T[] {
+function readStorageArray<T>(
+  key: string,
+  localFallbackFactory: () => T[]
+): T[] {
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) {
-      const initial = fallbackFactory();
+      if (isSupabaseConfigured) {
+        return [];
+      }
+      const initial = localFallbackFactory();
       window.localStorage.setItem(key, JSON.stringify(initial));
       return initial;
     }
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
-      const initial = fallbackFactory();
+      if (isSupabaseConfigured) {
+        return [];
+      }
+      const initial = localFallbackFactory();
       window.localStorage.setItem(key, JSON.stringify(initial));
       return initial;
     }
     return parsed as T[];
   } catch {
-    const initial = fallbackFactory();
+    if (isSupabaseConfigured) {
+      return [];
+    }
+    const initial = localFallbackFactory();
     try {
       window.localStorage.setItem(key, JSON.stringify(initial));
     } catch {
@@ -381,10 +392,11 @@ function mapAccountToRow(account: UserAccount): AccountRow {
 
 /**
  * Triển khai Hybrid DataService:
- * - Khi có cấu hình VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY: đọc/ghi trực tiếp
- *   với Supabase PostgreSQL và lắng nghe đồng bộ thời gian thực (Realtime).
- * - Khi chưa cấu hình biến môi trường (hoặc mất kết nối mạng): tự động fallback về
- *   localStorage, đảm bảo không bao giờ xảy ra lỗi màn hình trắng.
+ * - Khi có cấu hình VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY: luôn ưu tiên đọc/ghi
+ *   trực tiếp từ Supabase PostgreSQL và lắng nghe đồng bộ thời gian thực (Realtime),
+ *   tuyệt đối không tự ý ghi đè dữ liệu mẫu cứng (seed data) lên database thật.
+ * - Khi chưa cấu hình biến môi trường: tự động fallback về localStorage để không
+ *   bao giờ xảy ra lỗi màn hình trắng.
  */
 export class HybridLearningDataService implements ILearningDataService {
   isRemoteEnabled(): boolean {
@@ -434,33 +446,18 @@ export class HybridLearningDataService implements ILearningDataService {
 
       if (membersRes.error || weeksRes.error || logsRes.error) {
         console.warn(
-          '[Supabase] Không thể tải dữ liệu từ Supabase, đang dùng dữ liệu localStorage:',
+          '[Supabase] Không thể tải dữ liệu từ Supabase, đang giữ dữ liệu cache hiện tại:',
           membersRes.error || weeksRes.error || logsRes.error
         );
         return null;
       }
 
-      const remoteMembers = ((membersRes.data ?? []) as MemberRow[]).map(
-        mapRowToMember
+      const members = normalizeMemberOrder(
+        ((membersRes.data ?? []) as MemberRow[]).map(mapRowToMember)
       );
-      const remoteWeeks = ((weeksRes.data ?? []) as WeekRow[]).map(
-        mapRowToWeek
+      const weeks = normalizeWeekOrder(
+        ((weeksRes.data ?? []) as WeekRow[]).map(mapRowToWeek)
       );
-
-      // Nếu database trên Supabase vừa mới tạo bảng nhưng chưa có dữ liệu, tự động nạp Seed Data
-      if (remoteMembers.length === 0 && remoteWeeks.length === 0) {
-        await this.pushSeedDataToRemote();
-        return this.loadAll();
-      }
-
-      const members =
-        remoteMembers.length > 0
-          ? normalizeMemberOrder(remoteMembers)
-          : this.getMembers();
-      const weeks =
-        remoteWeeks.length > 0
-          ? normalizeWeekOrder(remoteWeeks)
-          : this.getWeeks();
       const logs = ((logsRes.data ?? []) as DailyLogRow[]).map(mapRowToLog);
 
       const uiSettings =
@@ -477,8 +474,6 @@ export class HybridLearningDataService implements ILearningDataService {
           );
           groupNotes[key] = row.content ?? '';
         }
-      } else {
-        Object.assign(groupNotes, this.getGroupNotes());
       }
 
       let accounts = this.getAccounts();
@@ -490,7 +485,7 @@ export class HybridLearningDataService implements ILearningDataService {
         accounts = (accountsRes.data as AccountRow[]).map(mapRowToAccount);
       }
 
-      // Cập nhật cache localStorage để lần mở app tiếp theo hiển thị tức thì
+      // Cập nhật cache localStorage theo đúng dữ liệu thật từ Supabase
       writeStorageValue(STORAGE_KEYS.MEMBERS, members);
       writeStorageValue(STORAGE_KEYS.WEEKS, weeks);
       writeStorageValue(STORAGE_KEYS.LOGS, logs);
@@ -508,7 +503,7 @@ export class HybridLearningDataService implements ILearningDataService {
       };
     } catch (error) {
       console.warn(
-        '[Supabase] Lỗi kết nối Supabase, tự động fallback về localStorage:',
+        '[Supabase] Lỗi kết nối Supabase, tạm dùng dữ liệu localStorage:',
         error
       );
       return null;
@@ -600,55 +595,6 @@ export class HybridLearningDataService implements ILearningDataService {
       window.removeEventListener('online', handleWindowFocus);
       void client.removeChannel(channel);
     };
-  }
-
-  private async pushSeedDataToRemote(): Promise<void> {
-    if (!supabase) return;
-    try {
-      const members = cloneSeedMembers();
-      const weeks = cloneSeedWeeks();
-      const logs = cloneSeedLogs();
-      const accounts = cloneSeedAccounts();
-      const uiSettings = cloneDefaultUiSettings();
-      const groupNotes = cloneSeedGroupNotes();
-
-      await supabase
-        .from('members')
-        .upsert(members.map(mapMemberToRow), { onConflict: 'id' });
-      await supabase
-        .from('weeks')
-        .upsert(weeks.map(mapWeekToRow), { onConflict: 'week_number' });
-      await supabase
-        .from('app_settings')
-        .upsert([mapUiSettingsToRow(uiSettings)], { onConflict: 'id' });
-      await supabase
-        .from('accounts')
-        .upsert(accounts.map(mapAccountToRow), { onConflict: 'id' });
-
-      const noteRows: GroupNoteRow[] = Object.entries(groupNotes).map(
-        ([key, content]) => {
-          const [weekStr, groupCode] = key.split('::');
-          return {
-            week_number: Number(weekStr),
-            group_code: groupCode,
-            content,
-          };
-        }
-      );
-      if (noteRows.length > 0) {
-        await supabase
-          .from('group_notes')
-          .upsert(noteRows, { onConflict: 'week_number,group_code' });
-      }
-
-      if (logs.length > 0) {
-        await supabase
-          .from('daily_logs')
-          .upsert(logs.map(mapLogToRow), { onConflict: 'log_date,member_id' });
-      }
-    } catch (error) {
-      console.warn('[Supabase] Không thể khởi tạo Seed Data từ client:', error);
-    }
   }
 
   getMembers(): Member[] {
@@ -811,16 +757,20 @@ export class HybridLearningDataService implements ILearningDataService {
   }
 
   getAccounts(): UserAccount[] {
-    const stored = readStorageArray<UserAccount>(
-      STORAGE_KEYS.ACCOUNTS,
-      cloneSeedAccounts
-    );
-    if (stored.length === 0) {
-      const initial = cloneSeedAccounts();
-      writeStorageValue(STORAGE_KEYS.ACCOUNTS, initial);
-      return initial;
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEYS.ACCOUNTS);
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed as UserAccount[];
+        }
+      }
+    } catch {
+      // Fallback below
     }
-    return stored;
+    const initial = cloneSeedAccounts();
+    writeStorageValue(STORAGE_KEYS.ACCOUNTS, initial);
+    return initial;
   }
 
   authenticate(username: string, password: string): UserAccount | null {
@@ -919,6 +869,9 @@ export class HybridLearningDataService implements ILearningDataService {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEYS.GROUP_NOTES);
       if (!raw) {
+        if (isSupabaseConfigured) {
+          return {};
+        }
         const initial = cloneSeedGroupNotes();
         window.localStorage.setItem(
           STORAGE_KEYS.GROUP_NOTES,
@@ -928,12 +881,18 @@ export class HybridLearningDataService implements ILearningDataService {
       }
       const parsed = JSON.parse(raw) as unknown;
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        if (isSupabaseConfigured) {
+          return {};
+        }
         const initial = cloneSeedGroupNotes();
         writeStorageValue(STORAGE_KEYS.GROUP_NOTES, initial);
         return initial;
       }
       return parsed as GroupPresentationNoteMap;
     } catch {
+      if (isSupabaseConfigured) {
+        return {};
+      }
       const initial = cloneSeedGroupNotes();
       writeStorageValue(STORAGE_KEYS.GROUP_NOTES, initial);
       return initial;
@@ -974,38 +933,6 @@ export class HybridLearningDataService implements ILearningDataService {
     }
 
     return next;
-  }
-
-  resetToSeedData(): LearningDataset {
-    const members = cloneSeedMembers();
-    const weeks = cloneSeedWeeks();
-    const logs = cloneSeedLogs();
-    const accounts = cloneSeedAccounts();
-    const uiSettings = cloneDefaultUiSettings();
-    const groupNotes = cloneSeedGroupNotes();
-
-    writeStorageValue(STORAGE_KEYS.MEMBERS, members);
-    writeStorageValue(STORAGE_KEYS.WEEKS, weeks);
-    writeStorageValue(STORAGE_KEYS.LOGS, logs);
-    writeStorageValue(STORAGE_KEYS.ACCOUNTS, accounts);
-    writeStorageValue(STORAGE_KEYS.UI_SETTINGS, uiSettings);
-    writeStorageValue(STORAGE_KEYS.GROUP_NOTES, groupNotes);
-
-    if (supabase) {
-      void (async () => {
-        try {
-          await supabase.from('daily_logs').delete().neq('id', '');
-          await supabase.from('group_notes').delete().neq('group_code', '');
-          await supabase.from('members').delete().neq('id', '');
-          await supabase.from('weeks').delete().gt('week_number', 0);
-          await this.pushSeedDataToRemote();
-        } catch (error) {
-          console.warn('[Supabase] Lỗi khôi phục dữ liệu mẫu trên Supabase:', error);
-        }
-      })();
-    }
-
-    return { members, weeks, logs, accounts, uiSettings, groupNotes };
   }
 }
 
