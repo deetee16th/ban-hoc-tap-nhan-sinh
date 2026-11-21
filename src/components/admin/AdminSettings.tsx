@@ -6,7 +6,6 @@ import {
   Eye,
   EyeOff,
   FileSpreadsheet,
-  KeyRound,
   Plus,
   RotateCcw,
   Search,
@@ -44,9 +43,9 @@ interface AdminSettingsProps {
   onSaveMember: (member: Member) => void;
   onDeleteMember: (memberId: string) => void;
   onSaveWeek: (week: WeekConfig) => void;
-  onUpdateAccountPassword: (
+  onUpdateAccountDetails: (
     accountId: string,
-    newPassword: string
+    updates: { displayName: string; password: string }
   ) => Promise<void>;
   onSaveUiSettings: (settings: UiSettings) => void;
   onNotify: (text: string, tone?: 'success' | 'info') => void;
@@ -63,7 +62,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   onSaveMember,
   onDeleteMember,
   onSaveWeek,
-  onUpdateAccountPassword,
+  onUpdateAccountDetails,
   onSaveUiSettings,
   onNotify,
 }) => {
@@ -75,17 +74,14 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [deletingMember, setDeletingMember] = useState<Member | null>(null);
 
-  // State quản lý mật khẩu tài khoản
+  // State quản lý & chỉnh sửa chi tiết tài khoản
   const [revealedAccountIds, setRevealedAccountIds] = useState<
     Record<string, boolean>
   >({});
-  const [editingPasswordAccountId, setEditingPasswordAccountId] = useState<
-    string | null
-  >(null);
-  const [newPasswordInput, setNewPasswordInput] = useState('');
-  const [savingPasswordAccountId, setSavingPasswordAccountId] = useState<
-    string | null
-  >(null);
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [editDisplayNameInput, setEditDisplayNameInput] = useState('');
+  const [editPasswordInput, setEditPasswordInput] = useState('');
+  const [savingAccountId, setSavingAccountId] = useState<string | null>(null);
 
   const currentWeek = useMemo(
     () => weeks.find((w) => w.weekNumber === selectedWeek) ?? weeks[0],
@@ -177,39 +173,57 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     }));
   };
 
-  const handleStartEditPassword = (account: UserAccount) => {
-    setEditingPasswordAccountId(account.id);
-    setNewPasswordInput('');
+  const handleStartEditAccount = (account: UserAccount) => {
+    setEditingAccountId(account.id);
+    setEditDisplayNameInput(account.displayName);
+    setEditPasswordInput(account.password);
   };
 
-  const handleSaveNewPassword = async (account: UserAccount) => {
-    const trimmed = newPasswordInput.trim();
-    if (trimmed.length < 4) {
-      onNotify('Mật khẩu mới cần có ít nhất 4 ký tự.', 'info');
+  const handleSaveAccountDetails = async (account: UserAccount) => {
+    const trimmedName = editDisplayNameInput.trim();
+    const trimmedPassword = editPasswordInput.trim();
+
+    if (!trimmedName) {
+      onNotify('Vui lòng nhập Tên hiển thị cho tài khoản.', 'info');
       return;
     }
-    setSavingPasswordAccountId(account.id);
+    if (trimmedPassword.length < 4) {
+      onNotify('Mật khẩu cần có ít nhất 4 ký tự.', 'info');
+      return;
+    }
+
+    setSavingAccountId(account.id);
     try {
-      await onUpdateAccountPassword(account.id, trimmed);
-      setEditingPasswordAccountId(null);
-      setNewPasswordInput('');
-      onNotify(`Đã cập nhật mật khẩu cho tài khoản @${account.username}.`);
+      await onUpdateAccountDetails(account.id, {
+        displayName: trimmedName,
+        password: trimmedPassword,
+      });
+      setEditingAccountId(null);
+      setEditDisplayNameInput('');
+      setEditPasswordInput('');
+      onNotify(
+        `Đã cập nhật thông tin tài khoản @${account.username} (${trimmedName}).`
+      );
     } catch {
       onNotify(
-        `Không thể cập nhật mật khẩu cho @${account.username} trên Supabase.`,
+        `Không thể cập nhật tài khoản @${account.username} trên Supabase.`,
         'info'
       );
     } finally {
-      setSavingPasswordAccountId(null);
+      setSavingAccountId(null);
     }
   };
 
   const handleResetDefaultPassword = async (account: UserAccount) => {
-    setSavingPasswordAccountId(account.id);
+    setSavingAccountId(account.id);
     try {
-      await onUpdateAccountPassword(account.id, '123456');
-      setEditingPasswordAccountId(null);
-      setNewPasswordInput('');
+      await onUpdateAccountDetails(account.id, {
+        displayName: account.displayName,
+        password: '123456',
+      });
+      setEditingAccountId(null);
+      setEditDisplayNameInput('');
+      setEditPasswordInput('');
       onNotify(`Đã đặt lại mật khẩu tài khoản @${account.username} về 123456.`);
     } catch {
       onNotify(
@@ -217,7 +231,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         'info'
       );
     } finally {
-      setSavingPasswordAccountId(null);
+      setSavingAccountId(null);
     }
   };
 
@@ -518,21 +532,21 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         </section>
       </div>
 
-      {/* Account Password Management (Admin Exclusive) */}
+      {/* Account Management (Admin Exclusive) */}
       <section className="bg-surface rounded-2xl border border-slate-200 p-5 sm:p-6 space-y-5">
         <div>
           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-            Quản lý Tài khoản Cán sự &amp; Đặt lại Mật khẩu
+            Quản lý &amp; Chỉnh sửa Tài khoản Cán sự
           </h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            Độc quyền của Admin: xem mật khẩu hiện tại, đổi mật khẩu hoặc đặt lại về 123456
+            Độc quyền của Admin: chỉnh sửa Tên hiển thị và Mật khẩu của từng tài khoản (giữ nguyên username, role và group_id)
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {accounts.map((acc) => {
             const isRevealed = Boolean(revealedAccountIds[acc.id]);
-            const isEditingPwd = editingPasswordAccountId === acc.id;
+            const isEditingAccount = editingAccountId === acc.id;
 
             return (
               <div
@@ -540,27 +554,13 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                 className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3 flex flex-col justify-between"
               >
                 <div className="space-y-1.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-base font-bold text-slate-900 truncate">
-                        {acc.displayName}
-                      </div>
-                      <div className="text-xs font-semibold text-emerald-700">
-                        @{acc.username}
-                      </div>
+                  <div className="min-w-0">
+                    <div className="text-base font-bold text-slate-900 truncate">
+                      {acc.displayName}
                     </div>
-                    <span className="shrink-0 px-2.5 py-0.5 rounded-full bg-surface border border-slate-200 text-[11px] font-bold text-slate-700">
-                      {acc.role === 'admin'
-                        ? 'Toàn quyền'
-                        : acc.role === 'banhoctap'
-                          ? '4 nhóm'
-                          : acc.assignedGroup
-                            ? getGroupDisplayName(
-                                acc.assignedGroup,
-                                uiSettings.groupNames
-                              )
-                            : ''}
-                    </span>
+                    <div className="text-xs font-semibold text-emerald-700">
+                      @{acc.username}
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between gap-2 pt-1">
@@ -585,34 +585,60 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                   </div>
                 </div>
 
-                {isEditingPwd ? (
-                  <div className="space-y-2 pt-2 border-t border-slate-200">
-                    <input
-                      type="text"
-                      value={newPasswordInput}
-                      onChange={(e) => setNewPasswordInput(e.target.value)}
-                      disabled={savingPasswordAccountId === acc.id}
-                      placeholder="Nhập mật khẩu mới (>= 4 ký tự)"
-                      className="w-full min-h-[38px] px-3 py-1.5 rounded-lg bg-surface border border-emerald-400 text-sm text-slate-900"
-                    />
-                    <div className="flex items-center gap-2">
+                {isEditingAccount ? (
+                  <div className="space-y-2.5 pt-2.5 border-t border-slate-200">
+                    <div>
+                      <label
+                        htmlFor={`acc-name-${acc.id}`}
+                        className="block text-xs font-bold text-slate-700 mb-1"
+                      >
+                        Tên hiển thị (name)
+                      </label>
+                      <input
+                        id={`acc-name-${acc.id}`}
+                        type="text"
+                        value={editDisplayNameInput}
+                        onChange={(e) => setEditDisplayNameInput(e.target.value)}
+                        disabled={savingAccountId === acc.id}
+                        placeholder="Nhập tên hiển thị..."
+                        className="w-full min-h-[38px] px-3 py-1.5 rounded-lg bg-surface border border-slate-300 focus:border-emerald-500 text-sm font-semibold text-slate-900"
+                      />
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor={`acc-pwd-${acc.id}`}
+                        className="block text-xs font-bold text-slate-700 mb-1"
+                      >
+                        Mật khẩu (password)
+                      </label>
+                      <input
+                        id={`acc-pwd-${acc.id}`}
+                        type="text"
+                        value={editPasswordInput}
+                        onChange={(e) => setEditPasswordInput(e.target.value)}
+                        disabled={savingAccountId === acc.id}
+                        placeholder="Nhập mật khẩu (>= 4 ký tự)"
+                        className="w-full min-h-[38px] px-3 py-1.5 rounded-lg bg-surface border border-slate-300 focus:border-emerald-500 text-sm font-mono font-semibold text-slate-900"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-0.5">
                       <button
                         type="button"
-                        disabled={savingPasswordAccountId === acc.id}
-                        onClick={() => void handleSaveNewPassword(acc)}
+                        disabled={savingAccountId === acc.id}
+                        onClick={() => void handleSaveAccountDetails(acc)}
                         className="flex-1 min-h-[38px] inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs"
                       >
                         <Check className="w-3.5 h-3.5" />
                         <span>
-                          {savingPasswordAccountId === acc.id
-                            ? 'Đang lưu...'
-                            : 'Lưu'}
+                          {savingAccountId === acc.id ? 'Đang lưu...' : 'Lưu'}
                         </span>
                       </button>
                       <button
                         type="button"
-                        disabled={savingPasswordAccountId === acc.id}
-                        onClick={() => setEditingPasswordAccountId(null)}
+                        disabled={savingAccountId === acc.id}
+                        onClick={() => setEditingAccountId(null)}
                         className="px-3 min-h-[38px] rounded-lg bg-surface border border-slate-300 disabled:opacity-50 text-slate-700 font-bold text-xs"
                       >
                         Hủy
@@ -623,16 +649,16 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                   <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
                     <button
                       type="button"
-                      disabled={savingPasswordAccountId === acc.id}
-                      onClick={() => handleStartEditPassword(acc)}
+                      disabled={savingAccountId === acc.id}
+                      onClick={() => handleStartEditAccount(acc)}
                       className="flex-1 min-h-[38px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-surface hover:bg-slate-100 disabled:opacity-50 border border-slate-200 text-slate-800 font-bold text-xs"
                     >
-                      <KeyRound className="w-3.5 h-3.5 text-amber-600" />
-                      <span>Đổi mật khẩu</span>
+                      <Edit3 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Chỉnh sửa thông tin</span>
                     </button>
                     <button
                       type="button"
-                      disabled={savingPasswordAccountId === acc.id}
+                      disabled={savingAccountId === acc.id}
                       onClick={() => void handleResetDefaultPassword(acc)}
                       className="min-h-[38px] px-3 inline-flex items-center justify-center gap-1 rounded-lg bg-amber-50 hover:bg-amber-100 disabled:opacity-50 border border-amber-200 text-amber-900 font-bold text-xs tabular-nums"
                     >

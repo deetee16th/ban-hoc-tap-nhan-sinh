@@ -35,11 +35,20 @@ export interface LearningDataset {
   groupNotes: GroupPresentationNoteMap;
 }
 
+export interface AuthSession {
+  accountId: string;
+  username: string;
+  password: string;
+}
+
 export interface ILearningDataService {
   isRemoteEnabled(): boolean;
   loadAll(): LearningDataset;
   syncFromRemote(): Promise<LearningDataset | null>;
-  subscribeToRealtime(onUpdate: (dataset: LearningDataset) => void): () => void;
+  subscribeToRealtime(
+    onUpdate: (dataset: LearningDataset) => void,
+    onAccountRealtimeUpdate?: (updatedAccount: UserAccount) => void
+  ): () => void;
   getMembers(): Member[];
   saveMember(member: Member): Member[];
   deleteMember(memberId: string): LearningDataset;
@@ -50,10 +59,21 @@ export interface ILearningDataService {
   upsertLogsBatch(logsToUpsert: DailyLog[]): DailyLog[];
   getAccounts(): UserAccount[];
   authenticate(username: string, password: string): Promise<UserAccount | null>;
+  updateAccountDetails(
+    accountId: string,
+    updates: { displayName: string; password: string }
+  ): Promise<UserAccount[]>;
   updateAccountPassword(
     accountId: string,
     newPassword: string
   ): Promise<UserAccount[]>;
+  getAuthSession(): AuthSession | null;
+  setAuthSession(account: UserAccount | null): void;
+  verifySessionWithRemote(): Promise<{
+    isValid: boolean;
+    passwordChanged: boolean;
+    account: UserAccount | null;
+  }>;
   getLoggedInAccountId(): string | null;
   setLoggedInAccountId(accountId: string | null): void;
   getUiSettings(): UiSettings;
@@ -72,6 +92,8 @@ const STORAGE_KEYS = {
   LOGS: 'nslt_v4_logs',
   ACCOUNTS: 'nslt_v4_accounts',
   AUTH_ACCOUNT_ID: 'nslt_v4_auth_account_id',
+  AUTH_PASSWORD: 'nslt_v4_auth_password',
+  AUTH_SESSION: 'nslt_v4_auth_session',
   UI_SETTINGS: 'nslt_v4_ui_settings',
   GROUP_NOTES: 'nslt_v4_group_notes',
 } as const;
@@ -129,8 +151,10 @@ interface AccountRow {
   id?: string | number;
   username: string;
   password: string;
+  name?: string | null;
   display_name?: string | null;
   role?: string | null;
+  group_id?: string | null;
   assigned_group?: string | null;
 }
 
@@ -391,13 +415,17 @@ function mapRowToAccount(row: AccountRow): UserAccount {
     username: row.username?.trim() || seedMatch?.username || normalizedUsername,
     password: String(row.password ?? ''),
     displayName:
+      row.name?.trim() ||
       row.display_name?.trim() ||
       seedMatch?.displayName ||
       row.username ||
       normalizedUsername,
     role: (row.role as AccountRole) || seedMatch?.role || 'group_officer',
     assignedGroup:
-      ((row.assigned_group as GroupId) ?? seedMatch?.assignedGroup) || null,
+      ((row.group_id as GroupId) ??
+        (row.assigned_group as GroupId) ??
+        seedMatch?.assignedGroup) ||
+      null,
   };
 }
 
@@ -549,7 +577,8 @@ export class HybridLearningDataService implements ILearningDataService {
   }
 
   subscribeToRealtime(
-    onUpdate: (dataset: LearningDataset) => void
+    onUpdate: (dataset: LearningDataset) => void,
+    onAccountRealtimeUpdate?: (updatedAccount: UserAccount) => void
   ): () => void {
     let debounceTimer: number | null = null;
 
@@ -611,6 +640,19 @@ export class HybridLearningDataService implements ILearningDataService {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'group_notes' },
         triggerRefresh
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'app_accounts' },
+        (payload) => {
+          if (payload.new && typeof payload.new === 'object') {
+            const row = payload.new as AccountRow;
+            if (row.username) {
+              onAccountRealtimeUpdate?.(mapRowToAccount(row));
+            }
+          }
+          triggerRefresh();
+        }
       )
       .on(
         'postgres_changes',
@@ -870,6 +912,118 @@ export class HybridLearningDataService implements ILearningDataService {
     return matched ? { ...matched } : null;
   }
 
+  async updateAccountDetails(
+    accountId: string,
+    updates: { displayName: string; password: string }
+  ): Promise<UserAccount[]> {
+    const current = this.getAccounts();
+    const targetAccount = current.find(
+      (acc) =>
+        acc.id === accountId ||
+        acc.username.toLowerCase() === accountId.toLowerCase()
+    );
+
+    const nextDisplayName =
+      updates.displayName.trim() || targetAccount?.displayName || '';
+    const nextPassword = updates.password.trim();
+
+    let next = current.map((acc) =>
+      acc.id === accountId ||
+      (targetAccount &&
+        acc.username.toLowerCase() === targetAccount.username.toLowerCase())
+        ? {
+            ...acc,
+            displayName: nextDisplayName,
+            password: nextPassword,
+          }
+        : acc
+    );
+
+    if (supabase && targetAccount) {
+      let { data: updatedByUsername, error: usernameError } = await supabase
+        .from('app_accounts')
+        .update({
+          name: nextDisplayName,
+          password: nextPassword,
+        })
+        .ilike('username', targetAccount.username)
+        .select('*');
+
+      // Fallback nếu bảng sử dụng tên cột display_name thay vì name
+      if (usernameError) {
+        const fallbackRes = await supabase
+          .from('app_accounts')
+          .update({
+            display_name: nextDisplayName,
+            password: nextPassword,
+          })
+          .ilike('username', targetAccount.username)
+          .select('*');
+        updatedByUsername = fallbackRes.data;
+        usernameError = fallbackRes.error;
+      }
+
+      if (usernameError) {
+        console.error(
+          '[Supabase] Lỗi cập nhật thông tin tài khoản trên bảng app_accounts:',
+          usernameError.message
+        );
+        throw new Error(usernameError.message);
+      }
+
+      if (!updatedByUsername || updatedByUsername.length === 0) {
+        let { data: updatedById, error: idError } = await supabase
+          .from('app_accounts')
+          .update({
+            name: nextDisplayName,
+            password: nextPassword,
+          })
+          .eq('id', targetAccount.id)
+          .select('*');
+
+        if (idError) {
+          const fallbackIdRes = await supabase
+            .from('app_accounts')
+            .update({
+              display_name: nextDisplayName,
+              password: nextPassword,
+            })
+            .eq('id', targetAccount.id)
+            .select('*');
+          updatedById = fallbackIdRes.data;
+          idError = fallbackIdRes.error;
+        }
+
+        if (idError) {
+          console.error(
+            '[Supabase] Lỗi cập nhật thông tin tài khoản theo id trên bảng app_accounts:',
+            idError.message
+          );
+          throw new Error(idError.message);
+        }
+
+        if (updatedById && updatedById.length > 0) {
+          const mapped = mapRowToAccount(updatedById[0] as AccountRow);
+          next = next.map((acc) =>
+            acc.username.toLowerCase() === mapped.username.toLowerCase()
+              ? mapped
+              : acc
+          );
+        }
+      } else {
+        const mapped = mapRowToAccount(updatedByUsername[0] as AccountRow);
+        next = next.map((acc) =>
+          acc.username.toLowerCase() === mapped.username.toLowerCase()
+            ? mapped
+            : acc
+        );
+      }
+    }
+
+    writeStorageValue(STORAGE_KEYS.ACCOUNTS, next);
+    return next;
+  }
+
   async updateAccountPassword(
     accountId: string,
     newPassword: string
@@ -880,51 +1034,155 @@ export class HybridLearningDataService implements ILearningDataService {
         acc.id === accountId ||
         acc.username.toLowerCase() === accountId.toLowerCase()
     );
+    return this.updateAccountDetails(accountId, {
+      displayName: targetAccount?.displayName ?? '',
+      password: newPassword,
+    });
+  }
 
-    const next = current.map((acc) =>
-      acc.id === accountId ||
-      (targetAccount &&
-        acc.username.toLowerCase() === targetAccount.username.toLowerCase())
-        ? { ...acc, password: newPassword }
-        : acc
-    );
-
-    if (supabase && targetAccount) {
-      const { data: updatedByUsername, error: usernameError } = await supabase
-        .from('app_accounts')
-        .update({ password: newPassword })
-        .ilike('username', targetAccount.username)
-        .select('*');
-
-      if (usernameError) {
-        console.error(
-          '[Supabase] Lỗi cập nhật cột password trên bảng app_accounts:',
-          usernameError.message
-        );
-        throw new Error(usernameError.message);
+  getAuthSession(): AuthSession | null {
+    try {
+      const rawSession = window.localStorage.getItem(STORAGE_KEYS.AUTH_SESSION);
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession) as Partial<AuthSession>;
+        if (
+          parsed &&
+          typeof parsed.username === 'string' &&
+          parsed.username.trim().length > 0 &&
+          typeof parsed.password === 'string'
+        ) {
+          return {
+            accountId: String(parsed.accountId || parsed.username),
+            username: parsed.username.trim(),
+            password: parsed.password,
+          };
+        }
       }
 
-      if (!updatedByUsername || updatedByUsername.length === 0) {
-        const { error: idError } = await supabase
-          .from('app_accounts')
-          .update({ password: newPassword })
-          .eq('id', targetAccount.id);
-
-        if (idError) {
-          console.error(
-            '[Supabase] Lỗi cập nhật cột password theo id trên bảng app_accounts:',
-            idError.message
-          );
-          throw new Error(idError.message);
+      const legacyAccountId = window.localStorage.getItem(
+        STORAGE_KEYS.AUTH_ACCOUNT_ID
+      );
+      const legacyPassword = window.localStorage.getItem(
+        STORAGE_KEYS.AUTH_PASSWORD
+      );
+      if (legacyAccountId && legacyAccountId.trim().length > 0) {
+        const cachedAccounts = this.getAccounts();
+        const matched = cachedAccounts.find(
+          (a) =>
+            a.id === legacyAccountId ||
+            a.username.toLowerCase() === legacyAccountId.toLowerCase()
+        );
+        if (matched) {
+          return {
+            accountId: matched.id,
+            username: matched.username,
+            password: legacyPassword ?? matched.password,
+          };
         }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  setAuthSession(account: UserAccount | null): void {
+    try {
+      if (account) {
+        const session: AuthSession = {
+          accountId: account.id,
+          username: account.username,
+          password: account.password,
+        };
+        window.localStorage.setItem(STORAGE_KEYS.AUTH_ACCOUNT_ID, account.id);
+        window.localStorage.setItem(
+          STORAGE_KEYS.AUTH_PASSWORD,
+          account.password
+        );
+        window.localStorage.setItem(
+          STORAGE_KEYS.AUTH_SESSION,
+          JSON.stringify(session)
+        );
+      } else {
+        window.localStorage.removeItem(STORAGE_KEYS.AUTH_ACCOUNT_ID);
+        window.localStorage.removeItem(STORAGE_KEYS.AUTH_PASSWORD);
+        window.localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+      }
+    } catch (error) {
+      console.error('Không thể cập nhật phiên đăng nhập:', error);
+    }
+  }
+
+  async verifySessionWithRemote(): Promise<{
+    isValid: boolean;
+    passwordChanged: boolean;
+    account: UserAccount | null;
+  }> {
+    const session = this.getAuthSession();
+    if (!session) {
+      return { isValid: false, passwordChanged: false, account: null };
+    }
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('app_accounts')
+          .select('*')
+          .ilike('username', session.username)
+          .maybeSingle();
+
+        if (error) {
+          return { isValid: true, passwordChanged: false, account: null };
+        }
+
+        if (!data) {
+          return { isValid: false, passwordChanged: true, account: null };
+        }
+
+        const remoteAccount = mapRowToAccount(data as AccountRow);
+
+        // Cập nhật tên hiển thị & dữ liệu mới nhất vào local cache
+        const currentAccounts = this.getAccounts();
+        const updatedAccounts = currentAccounts.map((acc) =>
+          acc.username.toLowerCase() === remoteAccount.username.toLowerCase() ||
+          acc.id === remoteAccount.id
+            ? remoteAccount
+            : acc
+        );
+        writeStorageValue(STORAGE_KEYS.ACCOUNTS, updatedAccounts);
+
+        if (remoteAccount.password !== session.password) {
+          return {
+            isValid: false,
+            passwordChanged: true,
+            account: remoteAccount,
+          };
+        }
+
+        return {
+          isValid: true,
+          passwordChanged: false,
+          account: remoteAccount,
+        };
+      } catch {
+        return { isValid: true, passwordChanged: false, account: null };
       }
     }
 
-    writeStorageValue(STORAGE_KEYS.ACCOUNTS, next);
-    return next;
+    const localAccount = this.getAccounts().find(
+      (a) =>
+        a.username.toLowerCase() === session.username.toLowerCase() ||
+        a.id === session.accountId
+    );
+    if (!localAccount || localAccount.password !== session.password) {
+      return { isValid: false, passwordChanged: true, account: null };
+    }
+    return { isValid: true, passwordChanged: false, account: localAccount };
   }
 
   getLoggedInAccountId(): string | null {
+    const session = this.getAuthSession();
+    if (session) return session.accountId;
     try {
       const value = window.localStorage.getItem(STORAGE_KEYS.AUTH_ACCOUNT_ID);
       return value && value.trim().length > 0 ? value : null;
@@ -936,9 +1194,18 @@ export class HybridLearningDataService implements ILearningDataService {
   setLoggedInAccountId(accountId: string | null): void {
     try {
       if (accountId) {
-        window.localStorage.setItem(STORAGE_KEYS.AUTH_ACCOUNT_ID, accountId);
+        const matched = this.getAccounts().find(
+          (a) =>
+            a.id === accountId ||
+            a.username.toLowerCase() === accountId.toLowerCase()
+        );
+        if (matched) {
+          this.setAuthSession(matched);
+        } else {
+          window.localStorage.setItem(STORAGE_KEYS.AUTH_ACCOUNT_ID, accountId);
+        }
       } else {
-        window.localStorage.removeItem(STORAGE_KEYS.AUTH_ACCOUNT_ID);
+        this.setAuthSession(null);
       }
     } catch (error) {
       console.error('Không thể cập nhật phiên đăng nhập:', error);

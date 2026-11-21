@@ -85,25 +85,70 @@ export function App() {
     };
   }, []);
 
-  const applyDataset = useCallback((dataset: ReturnType<typeof dataService.loadAll>) => {
-    setMembers(dataset.members);
-    setWeeks(dataset.weeks);
-    setLogs(dataset.logs);
-    setAccounts(dataset.accounts);
-    setUiSettings(dataset.uiSettings);
-    setGroupNotes(dataset.groupNotes);
-    if (dataset.weeks.length > 0) {
-      setSelectedWeek((prev) => {
-        const exists = dataset.weeks.some((w) => w.weekNumber === prev);
-        if (exists) return prev;
-        return dataset.weeks[dataset.weeks.length - 1].weekNumber;
-      });
-    }
-  }, []);
+  const forceLogoutDueToPasswordChange = useCallback(() => {
+    const activeSession = dataService.getAuthSession();
+    if (!activeSession) return;
+    dataService.setAuthSession(null);
+    setCurrentAccountId(null);
+    setIsPresentationMode(false);
+    setActiveTab('dashboard');
+    notify(
+      'Mật khẩu tài khoản vừa được thay đổi. Vui lòng đăng nhập lại.',
+      'info'
+    );
+  }, [notify]);
 
-  // Tự động đồng bộ từ Supabase (nếu có cấu hình env) & lắng nghe Realtime / Storage sync
+  const checkSessionValidity = useCallback(async () => {
+    const activeSession = dataService.getAuthSession();
+    if (!activeSession) return;
+
+    const result = await dataService.verifySessionWithRemote();
+    if (result.passwordChanged) {
+      forceLogoutDueToPasswordChange();
+    } else if (result.account) {
+      setAccounts(dataService.getAccounts());
+    }
+  }, [forceLogoutDueToPasswordChange]);
+
+  const applyDataset = useCallback(
+    (dataset: ReturnType<typeof dataService.loadAll>) => {
+      setMembers(dataset.members);
+      setWeeks(dataset.weeks);
+      setLogs(dataset.logs);
+      setAccounts(dataset.accounts);
+      setUiSettings(dataset.uiSettings);
+      setGroupNotes(dataset.groupNotes);
+      if (dataset.weeks.length > 0) {
+        setSelectedWeek((prev) => {
+          const exists = dataset.weeks.some((w) => w.weekNumber === prev);
+          if (exists) return prev;
+          return dataset.weeks[dataset.weeks.length - 1].weekNumber;
+        });
+      }
+
+      const activeSession = dataService.getAuthSession();
+      if (activeSession) {
+        const matchedAccount = dataset.accounts.find(
+          (a) =>
+            a.username.toLowerCase() === activeSession.username.toLowerCase() ||
+            a.id === activeSession.accountId
+        );
+        if (
+          matchedAccount &&
+          matchedAccount.password !== activeSession.password
+        ) {
+          forceLogoutDueToPasswordChange();
+        }
+      }
+    },
+    [forceLogoutDueToPasswordChange]
+  );
+
+  // Tự động đồng bộ từ Supabase, kiểm tra đối chiếu mật khẩu khi tải trang / quay lại tab / Realtime UPDATE
   useEffect(() => {
     let isMounted = true;
+
+    void checkSessionValidity();
 
     if (dataService.isRemoteEnabled()) {
       void dataService.syncFromRemote().then((remoteDataset) => {
@@ -113,17 +158,50 @@ export function App() {
       });
     }
 
-    const unsubscribe = dataService.subscribeToRealtime((updatedDataset) => {
-      if (isMounted) {
-        applyDataset(updatedDataset);
+    const unsubscribe = dataService.subscribeToRealtime(
+      (updatedDataset) => {
+        if (isMounted) {
+          applyDataset(updatedDataset);
+        }
+      },
+      (updatedAccount) => {
+        if (!isMounted) return;
+        const activeSession = dataService.getAuthSession();
+        if (
+          activeSession &&
+          (updatedAccount.username.toLowerCase() ===
+            activeSession.username.toLowerCase() ||
+            updatedAccount.id === activeSession.accountId)
+        ) {
+          if (updatedAccount.password !== activeSession.password) {
+            forceLogoutDueToPasswordChange();
+            return;
+          }
+        }
+        void checkSessionValidity();
       }
-    });
+    );
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void checkSessionValidity();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      void checkSessionValidity();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
 
     return () => {
       isMounted = false;
       unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
     };
-  }, [applyDataset]);
+  }, [applyDataset, checkSessionValidity, forceLogoutDueToPasswordChange]);
 
   // Đồng bộ tiêu đề tab trình duyệt theo tên ứng dụng Admin cấu hình
   useEffect(() => {
@@ -220,14 +298,14 @@ export function App() {
 
   const handleLoginSuccess = (account: UserAccount) => {
     setAccounts(dataService.getAccounts());
-    dataService.setLoggedInAccountId(account.id);
+    dataService.setAuthSession(account);
     setCurrentAccountId(account.id);
     setIsLoginModalOpen(false);
     notify(`Xin chào ${account.displayName} (@${account.username})!`, 'success');
   };
 
   const handleLogout = () => {
-    dataService.setLoggedInAccountId(null);
+    dataService.setAuthSession(null);
     setCurrentAccountId(null);
     setIsPresentationMode(false);
     setActiveTab('dashboard');
@@ -274,15 +352,30 @@ export function App() {
     setWeeks(updatedWeeks);
   };
 
-  const handleUpdateAccountPassword = async (
+  const handleUpdateAccountDetails = async (
     accountId: string,
-    newPassword: string
+    updates: { displayName: string; password: string }
   ) => {
-    const updatedAccounts = await dataService.updateAccountPassword(
+    const sessionBefore = dataService.getAuthSession();
+    const updatedAccounts = await dataService.updateAccountDetails(
       accountId,
-      newPassword
+      updates
     );
     setAccounts(updatedAccounts);
+
+    if (sessionBefore) {
+      const currentAccAfter = updatedAccounts.find(
+        (a) =>
+          a.username.toLowerCase() === sessionBefore.username.toLowerCase() ||
+          a.id === sessionBefore.accountId
+      );
+      if (
+        currentAccAfter &&
+        currentAccAfter.password !== sessionBefore.password
+      ) {
+        forceLogoutDueToPasswordChange();
+      }
+    }
   };
 
   const handleSaveUiSettings = (settings: UiSettings) => {
@@ -438,7 +531,7 @@ export function App() {
               onSaveMember={handleSaveMember}
               onDeleteMember={handleDeleteMember}
               onSaveWeek={handleSaveWeek}
-              onUpdateAccountPassword={handleUpdateAccountPassword}
+              onUpdateAccountDetails={handleUpdateAccountDetails}
               onSaveUiSettings={handleSaveUiSettings}
               onNotify={notify}
             />

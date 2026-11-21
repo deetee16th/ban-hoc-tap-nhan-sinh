@@ -104,10 +104,10 @@ CREATE TABLE IF NOT EXISTS public.app_accounts (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL,
-  display_name TEXT NOT NULL,
+  name TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('admin', 'banhoctap', 'group_officer')),
-  assigned_group TEXT CHECK (
-    assigned_group IS NULL OR assigned_group IN ('G1', 'G2', 'G3', 'G4')
+  group_id TEXT CHECK (
+    group_id IS NULL OR group_id IN ('G1', 'G2', 'G3', 'G4')
   ),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -241,7 +241,7 @@ VALUES (
 ON CONFLICT (id) DO NOTHING;
 
 -- 9.2. Seed Tài khoản cán sự nội bộ
-INSERT INTO public.app_accounts (id, username, password, display_name, role, assigned_group)
+INSERT INTO public.app_accounts (id, username, password, name, role, group_id)
 VALUES
   ('acc-admin', 'admin', '123456', 'Admin (Trưởng Ban Học Tập)', 'admin', NULL),
   ('acc-bht', 'banhoctap', '123456', 'Ban Học Tập', 'banhoctap', NULL),

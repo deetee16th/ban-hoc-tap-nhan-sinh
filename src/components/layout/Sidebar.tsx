@@ -112,13 +112,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {currentAccount ? (
           <div className="rounded-2xl bg-emerald-50/70 border border-emerald-200 p-3.5 space-y-2.5">
             <div className="min-w-0">
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-emerald-600 text-white text-[11px] font-bold">
-                {badgeText}
-              </span>
-              <div className="text-sm font-extrabold text-slate-900 truncate mt-1.5">
+              <div className="text-sm font-extrabold text-slate-900 truncate">
                 {currentAccount.displayName}
               </div>
-              <div className="text-xs font-medium text-emerald-800 truncate">
+              <div className="text-xs font-medium text-emerald-800 truncate mt-0.5">
                 @{currentAccount.username}
               </div>
             </div>

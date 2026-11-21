@@ -38,12 +38,5 @@ export function getLockedGroup(account: UserAccount | null): GroupId | null {
 
 export function getAccountBadgeText(account: UserAccount | null): string {
   if (!account) return 'Học viên (Chế độ xem)';
-  switch (account.role) {
-    case 'admin':
-      return 'Admin • Toàn quyền';
-    case 'banhoctap':
-      return 'Ban Học Tập • Chấm hộ 4 nhóm';
-    case 'group_officer':
-      return account.displayName;
-  }
+  return account.displayName;
 }

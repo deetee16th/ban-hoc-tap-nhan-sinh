@@ -90,14 +90,13 @@ export const MobileHeader: React.FC<{
       <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200/70">
         {currentAccount ? (
           <>
-            <div className="min-w-0 flex items-center gap-1.5">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
-              <span className="text-xs font-bold text-slate-900 truncate">
+            <div className="min-w-0">
+              <div className="text-xs font-extrabold text-slate-900 truncate leading-tight">
+                {currentAccount.displayName}
+              </div>
+              <div className="text-[11px] font-medium text-emerald-700 truncate leading-tight mt-0.5">
                 @{currentAccount.username}
-              </span>
-              <span className="truncate text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                {badgeText}
-              </span>
+              </div>
             </div>
             <button
               type="button"
