@@ -44,7 +44,10 @@ interface AdminSettingsProps {
   onSaveMember: (member: Member) => void;
   onDeleteMember: (memberId: string) => void;
   onSaveWeek: (week: WeekConfig) => void;
-  onUpdateAccountPassword: (accountId: string, newPassword: string) => void;
+  onUpdateAccountPassword: (
+    accountId: string,
+    newPassword: string
+  ) => Promise<void>;
   onSaveUiSettings: (settings: UiSettings) => void;
   onNotify: (text: string, tone?: 'success' | 'info') => void;
 }
@@ -80,6 +83,9 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     string | null
   >(null);
   const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [savingPasswordAccountId, setSavingPasswordAccountId] = useState<
+    string | null
+  >(null);
 
   const currentWeek = useMemo(
     () => weeks.find((w) => w.weekNumber === selectedWeek) ?? weeks[0],
@@ -176,23 +182,43 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     setNewPasswordInput('');
   };
 
-  const handleSaveNewPassword = (account: UserAccount) => {
+  const handleSaveNewPassword = async (account: UserAccount) => {
     const trimmed = newPasswordInput.trim();
     if (trimmed.length < 4) {
       onNotify('Mật khẩu mới cần có ít nhất 4 ký tự.', 'info');
       return;
     }
-    onUpdateAccountPassword(account.id, trimmed);
-    setEditingPasswordAccountId(null);
-    setNewPasswordInput('');
-    onNotify(`Đã cập nhật mật khẩu cho tài khoản @${account.username}.`);
+    setSavingPasswordAccountId(account.id);
+    try {
+      await onUpdateAccountPassword(account.id, trimmed);
+      setEditingPasswordAccountId(null);
+      setNewPasswordInput('');
+      onNotify(`Đã cập nhật mật khẩu cho tài khoản @${account.username}.`);
+    } catch {
+      onNotify(
+        `Không thể cập nhật mật khẩu cho @${account.username} trên Supabase.`,
+        'info'
+      );
+    } finally {
+      setSavingPasswordAccountId(null);
+    }
   };
 
-  const handleResetDefaultPassword = (account: UserAccount) => {
-    onUpdateAccountPassword(account.id, '123456');
-    setEditingPasswordAccountId(null);
-    setNewPasswordInput('');
-    onNotify(`Đã đặt lại mật khẩu tài khoản @${account.username} về 123456.`);
+  const handleResetDefaultPassword = async (account: UserAccount) => {
+    setSavingPasswordAccountId(account.id);
+    try {
+      await onUpdateAccountPassword(account.id, '123456');
+      setEditingPasswordAccountId(null);
+      setNewPasswordInput('');
+      onNotify(`Đã đặt lại mật khẩu tài khoản @${account.username} về 123456.`);
+    } catch {
+      onNotify(
+        `Không thể đặt lại mật khẩu cho @${account.username} trên Supabase.`,
+        'info'
+      );
+    } finally {
+      setSavingPasswordAccountId(null);
+    }
   };
 
   return (
@@ -565,22 +591,29 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                       type="text"
                       value={newPasswordInput}
                       onChange={(e) => setNewPasswordInput(e.target.value)}
+                      disabled={savingPasswordAccountId === acc.id}
                       placeholder="Nhập mật khẩu mới (>= 4 ký tự)"
                       className="w-full min-h-[38px] px-3 py-1.5 rounded-lg bg-surface border border-emerald-400 text-sm text-slate-900"
                     />
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => handleSaveNewPassword(acc)}
-                        className="flex-1 min-h-[38px] inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                        disabled={savingPasswordAccountId === acc.id}
+                        onClick={() => void handleSaveNewPassword(acc)}
+                        className="flex-1 min-h-[38px] inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs"
                       >
                         <Check className="w-3.5 h-3.5" />
-                        <span>Lưu</span>
+                        <span>
+                          {savingPasswordAccountId === acc.id
+                            ? 'Đang lưu...'
+                            : 'Lưu'}
+                        </span>
                       </button>
                       <button
                         type="button"
+                        disabled={savingPasswordAccountId === acc.id}
                         onClick={() => setEditingPasswordAccountId(null)}
-                        className="px-3 min-h-[38px] rounded-lg bg-surface border border-slate-300 text-slate-700 font-bold text-xs"
+                        className="px-3 min-h-[38px] rounded-lg bg-surface border border-slate-300 disabled:opacity-50 text-slate-700 font-bold text-xs"
                       >
                         Hủy
                       </button>
@@ -590,16 +623,18 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                   <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
                     <button
                       type="button"
+                      disabled={savingPasswordAccountId === acc.id}
                       onClick={() => handleStartEditPassword(acc)}
-                      className="flex-1 min-h-[38px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-surface hover:bg-slate-100 border border-slate-200 text-slate-800 font-bold text-xs"
+                      className="flex-1 min-h-[38px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-surface hover:bg-slate-100 disabled:opacity-50 border border-slate-200 text-slate-800 font-bold text-xs"
                     >
                       <KeyRound className="w-3.5 h-3.5 text-amber-600" />
                       <span>Đổi mật khẩu</span>
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleResetDefaultPassword(acc)}
-                      className="min-h-[38px] px-3 inline-flex items-center justify-center gap-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 font-bold text-xs tabular-nums"
+                      disabled={savingPasswordAccountId === acc.id}
+                      onClick={() => void handleResetDefaultPassword(acc)}
+                      className="min-h-[38px] px-3 inline-flex items-center justify-center gap-1 rounded-lg bg-amber-50 hover:bg-amber-100 disabled:opacity-50 border border-amber-200 text-amber-900 font-bold text-xs tabular-nums"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                       <span>123456</span>

@@ -134,7 +134,13 @@ export function App() {
 
   const currentAccount = useMemo(() => {
     if (!currentAccountId) return null;
-    return accounts.find((a) => a.id === currentAccountId) ?? null;
+    return (
+      accounts.find(
+        (a) =>
+          a.id === currentAccountId ||
+          a.username.toLowerCase() === currentAccountId.toLowerCase()
+      ) ?? null
+    );
   }, [accounts, currentAccountId]);
 
   const authLevel = useMemo(
@@ -213,6 +219,7 @@ export function App() {
   };
 
   const handleLoginSuccess = (account: UserAccount) => {
+    setAccounts(dataService.getAccounts());
     dataService.setLoggedInAccountId(account.id);
     setCurrentAccountId(account.id);
     setIsLoginModalOpen(false);
@@ -267,11 +274,11 @@ export function App() {
     setWeeks(updatedWeeks);
   };
 
-  const handleUpdateAccountPassword = (
+  const handleUpdateAccountPassword = async (
     accountId: string,
     newPassword: string
   ) => {
-    const updatedAccounts = dataService.updateAccountPassword(
+    const updatedAccounts = await dataService.updateAccountPassword(
       accountId,
       newPassword
     );

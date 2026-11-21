@@ -98,9 +98,9 @@ CREATE TABLE IF NOT EXISTS public.group_notes (
 );
 
 -- ============================================================================
--- 6. BẢNG TÀI KHOẢN CÁN SỰ NỘI BỘ (accounts)
+-- 6. BẢNG TÀI KHOẢN CÁN SỰ NỘI BỘ (app_accounts)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS public.accounts (
+CREATE TABLE IF NOT EXISTS public.app_accounts (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL,
@@ -150,9 +150,9 @@ CREATE TRIGGER trg_group_notes_updated_at
   BEFORE UPDATE ON public.group_notes
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_accounts_updated_at ON public.accounts;
-CREATE TRIGGER trg_accounts_updated_at
-  BEFORE UPDATE ON public.accounts
+DROP TRIGGER IF EXISTS trg_app_accounts_updated_at ON public.app_accounts;
+CREATE TRIGGER trg_app_accounts_updated_at
+  BEFORE UPDATE ON public.app_accounts
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 -- ============================================================================
@@ -163,7 +163,7 @@ ALTER TABLE public.weeks DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.daily_logs DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_settings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.group_notes DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.accounts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_accounts DISABLE ROW LEVEL SECURITY;
 
 -- Khai báo sẵn Policy mở cho cả anon & authenticated phòng trường hợp bật RLS trên Dashboard
 DROP POLICY IF EXISTS "Allow all access to members" ON public.members;
@@ -186,9 +186,9 @@ DROP POLICY IF EXISTS "Allow all access to group_notes" ON public.group_notes;
 CREATE POLICY "Allow all access to group_notes"
   ON public.group_notes FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Allow all access to accounts" ON public.accounts;
-CREATE POLICY "Allow all access to accounts"
-  ON public.accounts FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all access to app_accounts" ON public.app_accounts;
+CREATE POLICY "Allow all access to app_accounts"
+  ON public.app_accounts FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
 -- Kích hoạt Realtime cho các bảng chính (bỏ qua nếu đã được thêm từ trước)
 DO $$
@@ -215,7 +215,7 @@ BEGIN
     EXCEPTION WHEN duplicate_object THEN NULL;
     END;
     BEGIN
-      ALTER PUBLICATION supabase_realtime ADD TABLE public.accounts;
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.app_accounts;
     EXCEPTION WHEN duplicate_object THEN NULL;
     END;
   END IF;
@@ -241,7 +241,7 @@ VALUES (
 ON CONFLICT (id) DO NOTHING;
 
 -- 9.2. Seed Tài khoản cán sự nội bộ
-INSERT INTO public.accounts (id, username, password, display_name, role, assigned_group)
+INSERT INTO public.app_accounts (id, username, password, display_name, role, assigned_group)
 VALUES
   ('acc-admin', 'admin', '123456', 'Admin (Trưởng Ban Học Tập)', 'admin', NULL),
   ('acc-bht', 'banhoctap', '123456', 'Ban Học Tập', 'banhoctap', NULL),

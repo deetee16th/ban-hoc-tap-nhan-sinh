@@ -49,8 +49,11 @@ export interface ILearningDataService {
   upsertLog(log: DailyLog): DailyLog[];
   upsertLogsBatch(logsToUpsert: DailyLog[]): DailyLog[];
   getAccounts(): UserAccount[];
-  authenticate(username: string, password: string): UserAccount | null;
-  updateAccountPassword(accountId: string, newPassword: string): UserAccount[];
+  authenticate(username: string, password: string): Promise<UserAccount | null>;
+  updateAccountPassword(
+    accountId: string,
+    newPassword: string
+  ): Promise<UserAccount[]>;
   getLoggedInAccountId(): string | null;
   setLoggedInAccountId(accountId: string | null): void;
   getUiSettings(): UiSettings;
@@ -123,12 +126,12 @@ interface GroupNoteRow {
 }
 
 interface AccountRow {
-  id: string;
+  id?: string | number;
   username: string;
   password: string;
-  display_name: string;
-  role: string;
-  assigned_group: string | null;
+  display_name?: string | null;
+  role?: string | null;
+  assigned_group?: string | null;
 }
 
 function cloneSeedMembers(): Member[] {
@@ -369,25 +372,56 @@ function mapUiSettingsToRow(settings: UiSettings): AppSettingsRow {
 }
 
 function mapRowToAccount(row: AccountRow): UserAccount {
+  const normalizedUsername = String(row.username ?? '')
+    .trim()
+    .toLowerCase();
+  const seedMatch = SEED_ACCOUNTS.find(
+    (s) =>
+      s.username.toLowerCase() === normalizedUsername ||
+      (row.id !== undefined && row.id !== null && s.id === String(row.id))
+  );
+
   return {
-    id: row.id,
-    username: row.username,
-    password: row.password,
-    displayName: row.display_name,
-    role: row.role as AccountRole,
-    assignedGroup: (row.assigned_group as GroupId) || null,
+    id:
+      row.id !== undefined &&
+      row.id !== null &&
+      String(row.id).trim().length > 0
+        ? String(row.id)
+        : seedMatch?.id || `acc-${normalizedUsername}`,
+    username: row.username?.trim() || seedMatch?.username || normalizedUsername,
+    password: String(row.password ?? ''),
+    displayName:
+      row.display_name?.trim() ||
+      seedMatch?.displayName ||
+      row.username ||
+      normalizedUsername,
+    role: (row.role as AccountRole) || seedMatch?.role || 'group_officer',
+    assignedGroup:
+      ((row.assigned_group as GroupId) ?? seedMatch?.assignedGroup) || null,
   };
 }
 
-function mapAccountToRow(account: UserAccount): AccountRow {
-  return {
-    id: account.id,
-    username: account.username,
-    password: account.password,
-    display_name: account.displayName,
-    role: account.role,
-    assigned_group: account.assignedGroup,
-  };
+function mergeRemoteAccounts(rows: AccountRow[]): UserAccount[] {
+  const mappedRows = rows.map(mapRowToAccount);
+  const mergedFromSeed = SEED_ACCOUNTS.map((seed) => {
+    const matched = mappedRows.find(
+      (r) =>
+        r.username.toLowerCase() === seed.username.toLowerCase() ||
+        r.id === seed.id
+    );
+    return matched ? { ...matched } : { ...seed };
+  });
+
+  const extraAccounts = mappedRows.filter(
+    (r) =>
+      !SEED_ACCOUNTS.some(
+        (seed) =>
+          seed.username.toLowerCase() === r.username.toLowerCase() ||
+          seed.id === r.id
+      )
+  );
+
+  return [...mergedFromSeed, ...extraAccounts];
 }
 
 /**
@@ -441,15 +475,28 @@ export class HybridLearningDataService implements ILearningDataService {
           .eq('id', 'default')
           .maybeSingle(),
         supabase.from('group_notes').select('*'),
-        supabase.from('accounts').select('*'),
+        supabase.from('app_accounts').select('*'),
       ]);
+
+      let accounts = this.getAccounts();
+      if (
+        !accountsRes.error &&
+        Array.isArray(accountsRes.data) &&
+        accountsRes.data.length > 0
+      ) {
+        accounts = mergeRemoteAccounts(accountsRes.data as AccountRow[]);
+        writeStorageValue(STORAGE_KEYS.ACCOUNTS, accounts);
+      }
 
       if (membersRes.error || weeksRes.error || logsRes.error) {
         console.warn(
-          '[Supabase] Không thể tải dữ liệu từ Supabase, đang giữ dữ liệu cache hiện tại:',
+          '[Supabase] Không thể tải một số bảng dữ liệu từ Supabase, đang giữ dữ liệu cache hiện tại:',
           membersRes.error || weeksRes.error || logsRes.error
         );
-        return null;
+        return {
+          ...this.loadAll(),
+          accounts,
+        };
       }
 
       const members = normalizeMemberOrder(
@@ -474,15 +521,6 @@ export class HybridLearningDataService implements ILearningDataService {
           );
           groupNotes[key] = row.content ?? '';
         }
-      }
-
-      let accounts = this.getAccounts();
-      if (
-        !accountsRes.error &&
-        Array.isArray(accountsRes.data) &&
-        accountsRes.data.length > 0
-      ) {
-        accounts = (accountsRes.data as AccountRow[]).map(mapRowToAccount);
       }
 
       // Cập nhật cache localStorage theo đúng dữ liệu thật từ Supabase
@@ -576,7 +614,7 @@ export class HybridLearningDataService implements ILearningDataService {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'accounts' },
+        { event: '*', schema: 'public', table: 'app_accounts' },
         triggerRefresh
       )
       .subscribe();
@@ -773,8 +811,56 @@ export class HybridLearningDataService implements ILearningDataService {
     return initial;
   }
 
-  authenticate(username: string, password: string): UserAccount | null {
+  async authenticate(
+    username: string,
+    password: string
+  ): Promise<UserAccount | null> {
     const normalizedUsername = username.trim().toLowerCase();
+    if (!normalizedUsername || !password) return null;
+
+    // Khi đã cấu hình Supabase: truy vấn trực tiếp bảng app_accounts trên Supabase
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('app_accounts')
+        .select('*')
+        .ilike('username', normalizedUsername)
+        .eq('password', password)
+        .maybeSingle();
+
+      if (error) {
+        console.error(
+          '[Supabase] Lỗi truy vấn bảng app_accounts khi đăng nhập:',
+          error.message
+        );
+        return null;
+      }
+
+      if (!data) {
+        return null;
+      }
+
+      const matchedAccount = mapRowToAccount(data as AccountRow);
+
+      // Đồng bộ lại tài khoản vào bộ nhớ đệm cục bộ để UI nhất quán
+      const currentAccounts = this.getAccounts();
+      const updatedAccounts = currentAccounts.some(
+        (acc) =>
+          acc.id === matchedAccount.id ||
+          acc.username.toLowerCase() === matchedAccount.username.toLowerCase()
+      )
+        ? currentAccounts.map((acc) =>
+            acc.id === matchedAccount.id ||
+            acc.username.toLowerCase() === matchedAccount.username.toLowerCase()
+              ? matchedAccount
+              : acc
+          )
+        : [...currentAccounts, matchedAccount];
+
+      writeStorageValue(STORAGE_KEYS.ACCOUNTS, updatedAccounts);
+      return matchedAccount;
+    }
+
+    // Chỉ fallback về tài khoản mặc định khi chưa cấu hình Supabase
     const accounts = this.getAccounts();
     const matched = accounts.find(
       (acc) =>
@@ -784,25 +870,57 @@ export class HybridLearningDataService implements ILearningDataService {
     return matched ? { ...matched } : null;
   }
 
-  updateAccountPassword(accountId: string, newPassword: string): UserAccount[] {
+  async updateAccountPassword(
+    accountId: string,
+    newPassword: string
+  ): Promise<UserAccount[]> {
     const current = this.getAccounts();
-    const next = current.map((acc) =>
-      acc.id === accountId ? { ...acc, password: newPassword } : acc
+    const targetAccount = current.find(
+      (acc) =>
+        acc.id === accountId ||
+        acc.username.toLowerCase() === accountId.toLowerCase()
     );
-    writeStorageValue(STORAGE_KEYS.ACCOUNTS, next);
 
-    const updatedAccount = next.find((a) => a.id === accountId);
-    if (supabase && updatedAccount) {
-      void supabase
-        .from('accounts')
-        .upsert([mapAccountToRow(updatedAccount)], { onConflict: 'id' })
-        .then(({ error }) => {
-          if (error) {
-            console.warn('[Supabase] Lỗi cập nhật mật khẩu:', error.message);
-          }
-        });
+    const next = current.map((acc) =>
+      acc.id === accountId ||
+      (targetAccount &&
+        acc.username.toLowerCase() === targetAccount.username.toLowerCase())
+        ? { ...acc, password: newPassword }
+        : acc
+    );
+
+    if (supabase && targetAccount) {
+      const { data: updatedByUsername, error: usernameError } = await supabase
+        .from('app_accounts')
+        .update({ password: newPassword })
+        .ilike('username', targetAccount.username)
+        .select('*');
+
+      if (usernameError) {
+        console.error(
+          '[Supabase] Lỗi cập nhật cột password trên bảng app_accounts:',
+          usernameError.message
+        );
+        throw new Error(usernameError.message);
+      }
+
+      if (!updatedByUsername || updatedByUsername.length === 0) {
+        const { error: idError } = await supabase
+          .from('app_accounts')
+          .update({ password: newPassword })
+          .eq('id', targetAccount.id);
+
+        if (idError) {
+          console.error(
+            '[Supabase] Lỗi cập nhật cột password theo id trên bảng app_accounts:',
+            idError.message
+          );
+          throw new Error(idError.message);
+        }
+      }
     }
 
+    writeStorageValue(STORAGE_KEYS.ACCOUNTS, next);
     return next;
   }
 

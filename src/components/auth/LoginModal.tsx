@@ -5,7 +5,10 @@ import { UserAccount } from '../../types';
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAuthenticate: (username: string, password: string) => UserAccount | null;
+  onAuthenticate: (
+    username: string,
+    password: string
+  ) => Promise<UserAccount | null>;
   onLoginSuccess: (account: UserAccount) => void;
 }
 
@@ -18,6 +21,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -25,13 +29,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setUsername('');
     setPassword('');
     setShowPassword(false);
+    setIsSubmitting(false);
     setError('');
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     if (!username.trim()) {
       setError('Vui lòng nhập tên đăng nhập.');
       return;
@@ -41,13 +48,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    const authenticated = onAuthenticate(username, password);
-    if (!authenticated) {
-      setError('Tên đăng nhập hoặc mật khẩu chưa đúng. Vui lòng kiểm tra lại.');
-      return;
-    }
+    setIsSubmitting(true);
+    setError('');
 
-    onLoginSuccess(authenticated);
+    try {
+      const authenticated = await onAuthenticate(username, password);
+      if (!authenticated) {
+        setError('Tên đăng nhập hoặc mật khẩu chưa đúng. Vui lòng kiểm tra lại.');
+        return;
+      }
+
+      onLoginSuccess(authenticated);
+    } catch {
+      setError('Không thể xác thực tài khoản lúc này. Vui lòng thử lại.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -154,16 +170,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[44px] px-5 py-2.5 rounded-xl border border-slate-300 bg-surface hover:bg-slate-50 text-slate-700 font-bold text-sm sm:text-base"
+              disabled={isSubmitting}
+              className="min-h-[44px] px-5 py-2.5 rounded-xl border border-slate-300 bg-surface hover:bg-slate-50 disabled:opacity-50 text-slate-700 font-bold text-sm sm:text-base"
             >
               Hủy
             </button>
             <button
               type="submit"
-              className="min-h-[44px] flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm sm:text-base transition-colors"
+              disabled={isSubmitting}
+              className="min-h-[44px] flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-sm sm:text-base transition-colors"
             >
               <LogIn className="w-4 h-4" />
-              <span>Đăng nhập</span>
+              <span>{isSubmitting ? 'Đang kiểm tra...' : 'Đăng nhập'}</span>
             </button>
           </div>
         </form>
