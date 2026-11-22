@@ -26,9 +26,14 @@ export type HomeworkStatus =
 
 export type CameraStatus = 'Có' | 'Không' | 'Chưa chấm';
 
-export type AccountRole = 'admin' | 'banhoctap' | 'group_officer';
+export type AccountRole = 'admin' | 'banhoctap' | 'group' | 'group_officer';
 
-export type AuthLevel = 'guest' | 'group_officer' | 'banhoctap' | 'admin';
+export type AuthLevel =
+  | 'guest'
+  | 'group'
+  | 'group_officer'
+  | 'banhoctap'
+  | 'admin';
 
 export interface UserAccount {
   id: string;
@@ -37,6 +42,54 @@ export interface UserAccount {
   displayName: string;
   role: AccountRole;
   assignedGroup: GroupId | null;
+  groupId?: number | string | null;
+}
+
+export function normalizeGroupId(
+  raw: unknown,
+  fallbackUsername?: string | null
+): GroupId | null {
+  const candidates: string[] = [];
+  if (raw !== undefined && raw !== null && String(raw).trim().length > 0) {
+    candidates.push(String(raw).trim());
+  }
+  if (fallbackUsername && fallbackUsername.trim().length > 0) {
+    candidates.push(fallbackUsername.trim());
+  }
+
+  for (const val of candidates) {
+    const upper = val.toUpperCase();
+    if (upper === 'G1' || upper === '1') return 'G1';
+    if (upper === 'G2' || upper === '2') return 'G2';
+    if (upper === 'G3' || upper === '3') return 'G3';
+    if (upper === 'G4' || upper === '4') return 'G4';
+
+    const match = val.match(/(?:^|g|nhom|nhóm|group)\s*([1-4])$/i);
+    if (match) {
+      return `G${match[1]}` as GroupId;
+    }
+  }
+
+  return null;
+}
+
+export function normalizeAccountRole(
+  rawRole: unknown,
+  fallbackUsername?: string | null
+): AccountRole {
+  const r = String(rawRole ?? '')
+    .trim()
+    .toLowerCase();
+  if (r === 'admin') return 'admin';
+  if (r === 'banhoctap' || r === 'bht') return 'banhoctap';
+  if (r === 'group' || r === 'group_officer') return 'group';
+
+  const u = String(fallbackUsername ?? '')
+    .trim()
+    .toLowerCase();
+  if (u === 'admin') return 'admin';
+  if (u === 'banhoctap') return 'banhoctap';
+  return 'group';
 }
 
 export interface UiSettings {

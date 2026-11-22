@@ -7,7 +7,6 @@ import {
 } from '../data/seedData';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import {
-  AccountRole,
   AttendanceStatus,
   CameraStatus,
   DailyLog,
@@ -19,6 +18,8 @@ import {
   Member,
   MemberRole,
   MemberStatus,
+  normalizeAccountRole,
+  normalizeGroupId,
   UiSettings,
   UserAccount,
   WeekConfig,
@@ -103,6 +104,8 @@ interface MemberRow {
   stt: number;
   full_name: string;
   group_code: string;
+  group_id?: string | number | null;
+  group?: string | number | null;
   role: string;
   status: string;
   joined_date: string;
@@ -153,9 +156,12 @@ interface AccountRow {
   password: string;
   name?: string | null;
   display_name?: string | null;
+  displayName?: string | null;
   role?: string | null;
-  group_id?: string | null;
-  assigned_group?: string | null;
+  group_id?: string | number | null;
+  groupId?: string | number | null;
+  assigned_group?: string | number | null;
+  assignedGroup?: string | number | null;
 }
 
 function cloneSeedMembers(): Member[] {
@@ -287,7 +293,8 @@ function mapRowToMember(row: MemberRow): Member {
     id: row.id,
     stt: Number(row.stt),
     fullName: row.full_name,
-    group: row.group_code as GroupId,
+    group:
+      normalizeGroupId(row.group_code ?? row.group_id ?? row.group) ?? 'G1',
     role: row.role as MemberRole,
     status: (row.status as MemberStatus) || 'active',
     joinedDate: String(row.joined_date).slice(0, 10),
@@ -405,6 +412,24 @@ function mapRowToAccount(row: AccountRow): UserAccount {
       (row.id !== undefined && row.id !== null && s.id === String(row.id))
   );
 
+  const normalizedRole = normalizeAccountRole(
+    row.role ?? seedMatch?.role,
+    normalizedUsername
+  );
+
+  const rawGroup =
+    row.group_id ??
+    row.groupId ??
+    row.assigned_group ??
+    row.assignedGroup ??
+    seedMatch?.assignedGroup ??
+    null;
+
+  const normalizedGroup =
+    normalizedRole === 'group' || normalizedRole === 'group_officer'
+      ? normalizeGroupId(rawGroup, normalizedUsername)
+      : null;
+
   return {
     id:
       row.id !== undefined &&
@@ -417,15 +442,13 @@ function mapRowToAccount(row: AccountRow): UserAccount {
     displayName:
       row.name?.trim() ||
       row.display_name?.trim() ||
+      row.displayName?.trim() ||
       seedMatch?.displayName ||
       row.username ||
       normalizedUsername,
-    role: (row.role as AccountRole) || seedMatch?.role || 'group_officer',
-    assignedGroup:
-      ((row.group_id as GroupId) ??
-        (row.assigned_group as GroupId) ??
-        seedMatch?.assignedGroup) ||
-      null,
+    role: normalizedRole,
+    assignedGroup: normalizedGroup,
+    groupId: row.group_id ?? row.groupId ?? normalizedGroup,
   };
 }
 
@@ -681,7 +704,10 @@ export class HybridLearningDataService implements ILearningDataService {
     const members = readStorageArray<Member>(
       STORAGE_KEYS.MEMBERS,
       cloneSeedMembers
-    );
+    ).map((m) => ({
+      ...m,
+      group: normalizeGroupId(m.group) ?? 'G1',
+    }));
     return normalizeMemberOrder(members);
   }
 
@@ -842,7 +868,7 @@ export class HybridLearningDataService implements ILearningDataService {
       if (raw) {
         const parsed: unknown = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed as UserAccount[];
+          return (parsed as AccountRow[]).map(mapRowToAccount);
         }
       }
     } catch {

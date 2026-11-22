@@ -7,6 +7,7 @@ import {
   GROUPS,
   GroupId,
   Member,
+  normalizeGroupId,
   UserAccount,
   WeekConfig,
 } from '../../types';
@@ -20,6 +21,7 @@ import {
   isMemberInactiveOnDate,
   isMemberNotJoinedYet,
 } from '../../utils/analytics';
+import { getLockedGroup } from '../../utils/auth';
 import { EveningGradingCard } from './EveningGradingCard';
 import { MorningCheckInRow } from './MorningCheckInRow';
 
@@ -55,10 +57,15 @@ export const DailyCheckIn: React.FC<DailyCheckInProps> = ({
     [weeks, selectedWeek]
   );
 
+  const resolvedLockedGroup = useMemo(
+    () => normalizeGroupId(lockedGroup) ?? getLockedGroup(currentAccount),
+    [lockedGroup, currentAccount]
+  );
+
   const [sessionMode, setSessionMode] =
     useState<CheckInSessionMode>('morning');
   const [selectedGroup, setSelectedGroup] = useState<GroupId>(
-    lockedGroup ?? 'G1'
+    resolvedLockedGroup ?? 'G1'
   );
   const [selectedDate, setSelectedDate] = useState<string>(
     () => currentWeek?.studyDates[0] ?? ''
@@ -66,10 +73,10 @@ export const DailyCheckIn: React.FC<DailyCheckInProps> = ({
 
   // Khóa cứng nhóm khi Cán sự nhóm đăng nhập
   useEffect(() => {
-    if (lockedGroup) {
-      setSelectedGroup(lockedGroup);
+    if (resolvedLockedGroup) {
+      setSelectedGroup(resolvedLockedGroup);
     }
-  }, [lockedGroup]);
+  }, [resolvedLockedGroup]);
 
   // Đảm bảo selectedDate luôn thuộc danh sách ngày học của tuần hiện tại
   useEffect(() => {
@@ -83,7 +90,8 @@ export const DailyCheckIn: React.FC<DailyCheckInProps> = ({
     }
   }, [currentWeek, selectedDate]);
 
-  const activeGroup: GroupId = lockedGroup ?? selectedGroup;
+  const activeGroup: GroupId =
+    resolvedLockedGroup ?? normalizeGroupId(selectedGroup) ?? 'G1';
 
   const handleWeekChange = (weekNumber: number) => {
     onSelectWeek(weekNumber);
@@ -111,7 +119,8 @@ export const DailyCheckIn: React.FC<DailyCheckInProps> = ({
     return members
       .filter(
         (m) =>
-          m.group === activeGroup && !isMemberInactiveOnDate(m, selectedDate)
+          (normalizeGroupId(m.group) ?? m.group) === activeGroup &&
+          !isMemberInactiveOnDate(m, selectedDate)
       )
       .sort((a, b) => a.stt - b.stt);
   }, [members, activeGroup, selectedDate]);
@@ -137,16 +146,17 @@ export const DailyCheckIn: React.FC<DailyCheckInProps> = ({
 
     for (const member of members) {
       if (!isMemberEligibleOnDate(member, selectedDate)) continue;
-      progress[member.group].total += 1;
+      const memberGroup = normalizeGroupId(member.group) ?? 'G1';
+      progress[memberGroup].total += 1;
       const log = dateLogByMember.get(member.id);
       if (!log) continue;
 
       if (sessionMode === 'morning') {
         if (log.attendance !== 'Chưa chấm' || log.camera !== 'Chưa chấm') {
-          progress[member.group].done += 1;
+          progress[memberGroup].done += 1;
         }
       } else if (log.homework !== 'Chưa chấm') {
-        progress[member.group].done += 1;
+        progress[memberGroup].done += 1;
       }
     }
     return progress;
@@ -311,7 +321,7 @@ export const DailyCheckIn: React.FC<DailyCheckInProps> = ({
         {/* Chọn Nhóm */}
         <div>
           <div className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
-            {lockedGroup ? (
+            {resolvedLockedGroup ? (
               <>
                 <Lock className="w-3.5 h-3.5 text-amber-600" />
                 <span>Nhóm phụ trách của tài khoản</span>
@@ -321,17 +331,17 @@ export const DailyCheckIn: React.FC<DailyCheckInProps> = ({
             )}
           </div>
 
-          {lockedGroup ? (
+          {resolvedLockedGroup ? (
             <div className="rounded-xl bg-emerald-50/70 border border-emerald-200 p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-3">
                 <span className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-extrabold text-sm">
-                  {getGroupDisplayName(lockedGroup, groupNames)}
+                  {getGroupDisplayName(resolvedLockedGroup, groupNames)}
                 </span>
                 <div>
                   <div className="text-sm font-extrabold text-slate-900 tabular-nums">
-                    Đang chấm {getGroupDisplayName(lockedGroup, groupNames)} (
-                    {groupProgress[lockedGroup].done}/
-                    {groupProgress[lockedGroup].total} đã chấm)
+                    Đang chấm {getGroupDisplayName(resolvedLockedGroup, groupNames)} (
+                    {groupProgress[resolvedLockedGroup].done}/
+                    {groupProgress[resolvedLockedGroup].total} đã chấm)
                   </div>
                   <div className="text-xs font-medium text-emerald-800">
                     {currentAccount?.displayName ?? 'Cán sự nhóm'} chỉ xem và chấm điểm cho nhóm phụ trách

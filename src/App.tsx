@@ -284,7 +284,7 @@ export function App() {
 
   const dashboardGroupFilter = useMemo(() => {
     if (
-      authLevel === 'group_officer' &&
+      (authLevel === 'group' || authLevel === 'group_officer') &&
       !uiSettings.allowGroupOfficerViewOtherGroups
     ) {
       return lockedGroup;
