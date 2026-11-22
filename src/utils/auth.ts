@@ -12,18 +12,18 @@ export function getAuthLevel(account: UserAccount | null): AuthLevel {
   return normalizeAccountRole(account.role, account.username);
 }
 
-export function getAllowedTabs(level: AuthLevel): TabId[] {
-  switch (level) {
-    case 'admin':
-    case 'banhoctap':
-      return ['dashboard', 'checkin', 'insights', 'admin'];
-    case 'group':
-    case 'group_officer':
-      return ['dashboard', 'checkin'];
-    case 'guest':
-    default:
-      return ['dashboard'];
+export function getAllowedTabs(
+  level: AuthLevel,
+  isLoggedIn = level !== 'guest'
+): TabId[] {
+  if (!isLoggedIn && level === 'guest') {
+    return ['dashboard'];
   }
+  if (level === 'admin' || level === 'banhoctap') {
+    return ['dashboard', 'checkin', 'insights', 'admin'];
+  }
+  // Mọi tài khoản đã đăng nhập (bao gồm role === 'group') đều mở tab Sổ Theo Dõi Ngày
+  return ['dashboard', 'checkin'];
 }
 
 export function canManageAccounts(level: AuthLevel): boolean {
@@ -45,9 +45,9 @@ export function canViewIndividualDetails(level: AuthLevel): boolean {
 export function getLockedGroup(account: UserAccount | null): GroupId | null {
   if (!account) return null;
   const role = normalizeAccountRole(account.role, account.username);
-  if (role !== 'group' && role !== 'group_officer') return null;
+  if (role === 'admin' || role === 'banhoctap') return null;
   return normalizeGroupId(
-    account.assignedGroup ?? account.groupId,
+    account.group_id ?? account.groupId ?? account.assignedGroup,
     account.username
   );
 }

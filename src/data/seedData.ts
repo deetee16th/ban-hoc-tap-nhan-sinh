@@ -16,6 +16,8 @@ export const SEED_ACCOUNTS: UserAccount[] = [
     password: '123456',
     displayName: 'Admin (Trưởng Ban Học Tập)',
     role: 'admin',
+    group_id: null,
+    groupId: null,
     assignedGroup: null,
   },
   {
@@ -24,6 +26,8 @@ export const SEED_ACCOUNTS: UserAccount[] = [
     password: '123456',
     displayName: 'Ban Học Tập',
     role: 'banhoctap',
+    group_id: null,
+    groupId: null,
     assignedGroup: null,
   },
   {
@@ -32,8 +36,9 @@ export const SEED_ACCOUNTS: UserAccount[] = [
     password: '123456',
     displayName: 'Cán sự Nhóm 1',
     role: 'group',
-    assignedGroup: 'G1',
+    group_id: 1,
     groupId: 1,
+    assignedGroup: 'G1',
   },
   {
     id: 'acc-g2',
@@ -41,8 +46,9 @@ export const SEED_ACCOUNTS: UserAccount[] = [
     password: '123456',
     displayName: 'Cán sự Nhóm 2',
     role: 'group',
-    assignedGroup: 'G2',
+    group_id: 2,
     groupId: 2,
+    assignedGroup: 'G2',
   },
   {
     id: 'acc-g3',
@@ -50,8 +56,9 @@ export const SEED_ACCOUNTS: UserAccount[] = [
     password: '123456',
     displayName: 'Cán sự Nhóm 3',
     role: 'group',
-    assignedGroup: 'G3',
+    group_id: 3,
     groupId: 3,
+    assignedGroup: 'G3',
   },
   {
     id: 'acc-g4',
@@ -59,8 +66,9 @@ export const SEED_ACCOUNTS: UserAccount[] = [
     password: '123456',
     displayName: 'Cán sự Nhóm 4',
     role: 'group',
-    assignedGroup: 'G4',
+    group_id: 4,
     groupId: 4,
+    assignedGroup: 'G4',
   },
 ];
 

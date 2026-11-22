@@ -49,8 +49,8 @@ export function App() {
     initialData.groupNotes
   );
 
-  const [currentAccountId, setCurrentAccountId] = useState<string | null>(() =>
-    dataService.getLoggedInAccountId()
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() =>
+    dataService.getLoggedInAccount()
   );
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
@@ -89,7 +89,7 @@ export function App() {
     const activeSession = dataService.getAuthSession();
     if (!activeSession) return;
     dataService.setAuthSession(null);
-    setCurrentAccountId(null);
+    setCurrentUser(null);
     setIsPresentationMode(false);
     setActiveTab('dashboard');
     notify(
@@ -106,7 +106,9 @@ export function App() {
     if (result.passwordChanged) {
       forceLogoutDueToPasswordChange();
     } else if (result.account) {
+      dataService.setAuthSession(result.account);
       setAccounts(dataService.getAccounts());
+      setCurrentUser(result.account);
     }
   }, [forceLogoutDueToPasswordChange]);
 
@@ -133,11 +135,13 @@ export function App() {
             a.username.toLowerCase() === activeSession.username.toLowerCase() ||
             a.id === activeSession.accountId
         );
-        if (
-          matchedAccount &&
-          matchedAccount.password !== activeSession.password
-        ) {
-          forceLogoutDueToPasswordChange();
+        if (matchedAccount) {
+          if (matchedAccount.password !== activeSession.password) {
+            forceLogoutDueToPasswordChange();
+          } else {
+            dataService.setAuthSession(matchedAccount);
+            setCurrentUser(matchedAccount);
+          }
         }
       }
     },
@@ -211,21 +215,23 @@ export function App() {
   }, [uiSettings.appName, uiSettings.appSubtitle]);
 
   const currentAccount = useMemo(() => {
-    if (!currentAccountId) return null;
-    return (
-      accounts.find(
-        (a) =>
-          a.id === currentAccountId ||
-          a.username.toLowerCase() === currentAccountId.toLowerCase()
-      ) ?? null
+    if (!currentUser) return null;
+    const matched = accounts.find(
+      (a) =>
+        a.username.toLowerCase() === currentUser.username.toLowerCase() ||
+        a.id === currentUser.id
     );
-  }, [accounts, currentAccountId]);
+    return matched ?? currentUser;
+  }, [accounts, currentUser]);
 
   const authLevel = useMemo(
     () => getAuthLevel(currentAccount),
     [currentAccount]
   );
-  const allowedTabs = useMemo(() => getAllowedTabs(authLevel), [authLevel]);
+  const allowedTabs = useMemo(
+    () => getAllowedTabs(authLevel, Boolean(currentAccount)),
+    [authLevel, currentAccount]
+  );
   const lockedGroup = useMemo(
     () => getLockedGroup(currentAccount),
     [currentAccount]
@@ -297,16 +303,16 @@ export function App() {
   };
 
   const handleLoginSuccess = (account: UserAccount) => {
-    setAccounts(dataService.getAccounts());
     dataService.setAuthSession(account);
-    setCurrentAccountId(account.id);
+    setAccounts(dataService.getAccounts());
+    setCurrentUser(account);
     setIsLoginModalOpen(false);
     notify(`Xin chào ${account.displayName} (@${account.username})!`, 'success');
   };
 
   const handleLogout = () => {
     dataService.setAuthSession(null);
-    setCurrentAccountId(null);
+    setCurrentUser(null);
     setIsPresentationMode(false);
     setActiveTab('dashboard');
     notify('Đã đăng xuất về chế độ Học viên (Chế độ xem).', 'info');
@@ -369,11 +375,13 @@ export function App() {
           a.username.toLowerCase() === sessionBefore.username.toLowerCase() ||
           a.id === sessionBefore.accountId
       );
-      if (
-        currentAccAfter &&
-        currentAccAfter.password !== sessionBefore.password
-      ) {
-        forceLogoutDueToPasswordChange();
+      if (currentAccAfter) {
+        if (currentAccAfter.password !== sessionBefore.password) {
+          forceLogoutDueToPasswordChange();
+        } else {
+          dataService.setAuthSession(currentAccAfter);
+          setCurrentUser(currentAccAfter);
+        }
       }
     }
   };
@@ -491,21 +499,22 @@ export function App() {
             />
           )}
 
-          {activeTab === 'checkin' && allowedTabs.includes('checkin') && (
-            <DailyCheckIn
-              members={members}
-              logs={logs}
-              weeks={weeks}
-              selectedWeek={selectedWeek}
-              onSelectWeek={setSelectedWeek}
-              lockedGroup={lockedGroup}
-              currentAccount={currentAccount}
-              groupNames={uiSettings.groupNames}
-              onUpsertLog={handleUpsertLog}
-              onUpsertLogsBatch={handleUpsertLogsBatch}
-              onNotify={notify}
-            />
-          )}
+          {activeTab === 'checkin' &&
+            (Boolean(currentAccount) || allowedTabs.includes('checkin')) && (
+              <DailyCheckIn
+                members={members}
+                logs={logs}
+                weeks={weeks}
+                selectedWeek={selectedWeek}
+                onSelectWeek={setSelectedWeek}
+                lockedGroup={lockedGroup}
+                currentAccount={currentAccount}
+                groupNames={uiSettings.groupNames}
+                onUpsertLog={handleUpsertLog}
+                onUpsertLogsBatch={handleUpsertLogsBatch}
+                onNotify={notify}
+              />
+            )}
 
           {activeTab === 'insights' && allowedTabs.includes('insights') && (
             <InsightsSupport
@@ -543,6 +552,7 @@ export function App() {
       <MobileBottomNav
         activeTab={activeTab}
         allowedTabs={allowedTabs}
+        currentAccount={currentAccount}
         onSelectTab={handleSelectTab}
       />
 

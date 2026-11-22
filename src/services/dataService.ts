@@ -7,6 +7,7 @@ import {
 } from '../data/seedData';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import {
+  AccountRole,
   AttendanceStatus,
   CameraStatus,
   DailyLog,
@@ -20,6 +21,7 @@ import {
   MemberStatus,
   normalizeAccountRole,
   normalizeGroupId,
+  normalizeNumericGroupId,
   UiSettings,
   UserAccount,
   WeekConfig,
@@ -40,6 +42,11 @@ export interface AuthSession {
   accountId: string;
   username: string;
   password: string;
+  displayName?: string;
+  role?: AccountRole;
+  group_id?: number | null;
+  groupId?: number | null;
+  assignedGroup?: GroupId | null;
 }
 
 export interface ILearningDataService {
@@ -70,6 +77,7 @@ export interface ILearningDataService {
   ): Promise<UserAccount[]>;
   getAuthSession(): AuthSession | null;
   setAuthSession(account: UserAccount | null): void;
+  getLoggedInAccount(): UserAccount | null;
   verifySessionWithRemote(): Promise<{
     isValid: boolean;
     passwordChanged: boolean;
@@ -422,13 +430,20 @@ function mapRowToAccount(row: AccountRow): UserAccount {
     row.groupId ??
     row.assigned_group ??
     row.assignedGroup ??
+    seedMatch?.group_id ??
     seedMatch?.assignedGroup ??
     null;
 
-  const normalizedGroup =
-    normalizedRole === 'group' || normalizedRole === 'group_officer'
-      ? normalizeGroupId(rawGroup, normalizedUsername)
-      : null;
+  const isGroupRole =
+    normalizedRole === 'group' || normalizedRole === 'group_officer';
+
+  const normalizedGroup = isGroupRole
+    ? normalizeGroupId(rawGroup, normalizedUsername)
+    : null;
+
+  const numericGroupId = isGroupRole
+    ? normalizeNumericGroupId(rawGroup, normalizedUsername)
+    : null;
 
   return {
     id:
@@ -447,8 +462,9 @@ function mapRowToAccount(row: AccountRow): UserAccount {
       row.username ||
       normalizedUsername,
     role: normalizedRole,
+    group_id: numericGroupId,
+    groupId: numericGroupId,
     assignedGroup: normalizedGroup,
-    groupId: row.group_id ?? row.groupId ?? normalizedGroup,
   };
 }
 
@@ -925,6 +941,7 @@ export class HybridLearningDataService implements ILearningDataService {
         : [...currentAccounts, matchedAccount];
 
       writeStorageValue(STORAGE_KEYS.ACCOUNTS, updatedAccounts);
+      this.setAuthSession(matchedAccount);
       return matchedAccount;
     }
 
@@ -935,7 +952,11 @@ export class HybridLearningDataService implements ILearningDataService {
         acc.username.toLowerCase() === normalizedUsername &&
         acc.password === password
     );
-    return matched ? { ...matched } : null;
+    if (matched) {
+      this.setAuthSession(matched);
+      return { ...matched };
+    }
+    return null;
   }
 
   async updateAccountDetails(
@@ -1070,17 +1091,39 @@ export class HybridLearningDataService implements ILearningDataService {
     try {
       const rawSession = window.localStorage.getItem(STORAGE_KEYS.AUTH_SESSION);
       if (rawSession) {
-        const parsed = JSON.parse(rawSession) as Partial<AuthSession>;
+        const parsed = JSON.parse(rawSession) as Partial<AuthSession> &
+          Partial<AccountRow>;
         if (
           parsed &&
           typeof parsed.username === 'string' &&
           parsed.username.trim().length > 0 &&
           typeof parsed.password === 'string'
         ) {
+          const usernameTrimmed = parsed.username.trim();
+          const role = normalizeAccountRole(parsed.role, usernameTrimmed);
+          const isGroup = role === 'group' || role === 'group_officer';
+          const rawGrp =
+            parsed.group_id ??
+            parsed.groupId ??
+            parsed.assignedGroup ??
+            parsed.assigned_group ??
+            null;
+          const numericGroupId = isGroup
+            ? normalizeNumericGroupId(rawGrp, usernameTrimmed)
+            : null;
+          const assignedGroup = isGroup
+            ? normalizeGroupId(rawGrp, usernameTrimmed)
+            : null;
+
           return {
-            accountId: String(parsed.accountId || parsed.username),
-            username: parsed.username.trim(),
+            accountId: String(parsed.accountId || usernameTrimmed),
+            username: usernameTrimmed,
             password: parsed.password,
+            displayName: parsed.displayName || parsed.name || usernameTrimmed,
+            role,
+            group_id: numericGroupId,
+            groupId: numericGroupId,
+            assignedGroup,
           };
         }
       }
@@ -1103,6 +1146,11 @@ export class HybridLearningDataService implements ILearningDataService {
             accountId: matched.id,
             username: matched.username,
             password: legacyPassword ?? matched.password,
+            displayName: matched.displayName,
+            role: matched.role,
+            group_id: matched.group_id,
+            groupId: matched.group_id,
+            assignedGroup: matched.assignedGroup,
           };
         }
       }
@@ -1115,15 +1163,33 @@ export class HybridLearningDataService implements ILearningDataService {
   setAuthSession(account: UserAccount | null): void {
     try {
       if (account) {
-        const session: AuthSession = {
-          accountId: account.id,
+        const normalized = mapRowToAccount({
+          id: account.id,
           username: account.username,
           password: account.password,
+          displayName: account.displayName,
+          role: account.role,
+          group_id:
+            account.group_id ?? account.groupId ?? account.assignedGroup,
+          assignedGroup: account.assignedGroup,
+        });
+        const session: AuthSession = {
+          accountId: normalized.id,
+          username: normalized.username,
+          password: normalized.password,
+          displayName: normalized.displayName,
+          role: normalized.role,
+          group_id: normalized.group_id,
+          groupId: normalized.group_id,
+          assignedGroup: normalized.assignedGroup,
         };
-        window.localStorage.setItem(STORAGE_KEYS.AUTH_ACCOUNT_ID, account.id);
+        window.localStorage.setItem(
+          STORAGE_KEYS.AUTH_ACCOUNT_ID,
+          normalized.id
+        );
         window.localStorage.setItem(
           STORAGE_KEYS.AUTH_PASSWORD,
-          account.password
+          normalized.password
         );
         window.localStorage.setItem(
           STORAGE_KEYS.AUTH_SESSION,
@@ -1137,6 +1203,43 @@ export class HybridLearningDataService implements ILearningDataService {
     } catch (error) {
       console.error('Không thể cập nhật phiên đăng nhập:', error);
     }
+  }
+
+  getLoggedInAccount(): UserAccount | null {
+    const session = this.getAuthSession();
+    if (!session) return null;
+
+    const accounts = this.getAccounts();
+    const matched = accounts.find(
+      (a) =>
+        a.username.toLowerCase() === session.username.toLowerCase() ||
+        a.id === session.accountId
+    );
+    if (matched) {
+      return mapRowToAccount({
+        id: matched.id,
+        username: matched.username,
+        password: matched.password,
+        displayName: matched.displayName,
+        role: matched.role || session.role,
+        group_id:
+          matched.group_id ??
+          matched.groupId ??
+          matched.assignedGroup ??
+          session.group_id ??
+          session.assignedGroup,
+      });
+    }
+
+    return mapRowToAccount({
+      id: session.accountId,
+      username: session.username,
+      password: session.password,
+      displayName: session.displayName || session.username,
+      role: session.role,
+      group_id: session.group_id ?? session.groupId ?? session.assignedGroup,
+      assignedGroup: session.assignedGroup,
+    });
   }
 
   async verifySessionWithRemote(): Promise<{

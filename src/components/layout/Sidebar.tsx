@@ -82,9 +82,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
   qualifiedRate,
   onOpenPresentation,
 }) => {
-  const visibleNavItems = NAV_ITEMS.filter((item) =>
-    allowedTabs.includes(item.id)
-  );
+  const isLoggedIn = Boolean(currentAccount);
+  const isAdminOrBht =
+    currentAccount?.role === 'admin' || currentAccount?.role === 'banhoctap';
+
+  const visibleNavItems = NAV_ITEMS.filter((item) => {
+    if (item.id === 'dashboard') return true;
+    if (item.id === 'checkin') {
+      // Mọi tài khoản đã đăng nhập (currentUser !== null) đều hiển thị tab Sổ Theo Dõi Ngày
+      return isLoggedIn;
+    }
+    if (item.id === 'admin') {
+      // Tab Quản Lý Lớp chỉ hiển thị cho admin và banhoctap
+      return isAdminOrBht && allowedTabs.includes('admin');
+    }
+    return isLoggedIn && allowedTabs.includes(item.id);
+  });
   const badgeText = getAccountBadgeText(currentAccount);
   const monogram = getMonogram(uiSettings.appName);
 

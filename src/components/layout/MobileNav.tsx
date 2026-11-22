@@ -130,9 +130,30 @@ export const MobileHeader: React.FC<{
 export const MobileBottomNav: React.FC<{
   activeTab: TabId;
   allowedTabs: TabId[];
+  currentAccount?: UserAccount | null;
   onSelectTab: (tab: TabId) => void;
-}> = ({ activeTab, allowedTabs, onSelectTab }) => {
-  const visibleTabs = MOBILE_TABS.filter((t) => allowedTabs.includes(t.id));
+}> = ({ activeTab, allowedTabs, currentAccount, onSelectTab }) => {
+  const isLoggedIn =
+    currentAccount !== undefined
+      ? Boolean(currentAccount)
+      : allowedTabs.includes('checkin');
+  const isAdminOrBht =
+    currentAccount !== undefined
+      ? currentAccount?.role === 'admin' || currentAccount?.role === 'banhoctap'
+      : allowedTabs.includes('admin');
+
+  const visibleTabs = MOBILE_TABS.filter((t) => {
+    if (t.id === 'dashboard') return true;
+    if (t.id === 'checkin') {
+      // Mọi tài khoản đã đăng nhập (currentUser !== null) đều hiển thị tab Sổ ngày
+      return isLoggedIn;
+    }
+    if (t.id === 'admin') {
+      // Tab Quản Lý Lớp chỉ hiển thị cho admin và banhoctap
+      return isAdminOrBht && allowedTabs.includes('admin');
+    }
+    return isLoggedIn && allowedTabs.includes(t.id);
+  });
 
   if (visibleTabs.length <= 1) {
     return null;

@@ -57,10 +57,23 @@ export const DailyCheckIn: React.FC<DailyCheckInProps> = ({
     [weeks, selectedWeek]
   );
 
-  const resolvedLockedGroup = useMemo(
-    () => normalizeGroupId(lockedGroup) ?? getLockedGroup(currentAccount),
-    [lockedGroup, currentAccount]
-  );
+  const resolvedLockedGroup = useMemo(() => {
+    if (
+      currentAccount &&
+      (currentAccount.role === 'group' ||
+        currentAccount.role === 'group_officer')
+    ) {
+      return (
+        normalizeGroupId(
+          currentAccount.group_id ??
+            currentAccount.groupId ??
+            currentAccount.assignedGroup,
+          currentAccount.username
+        ) ?? normalizeGroupId(lockedGroup)
+      );
+    }
+    return normalizeGroupId(lockedGroup) ?? getLockedGroup(currentAccount);
+  }, [lockedGroup, currentAccount]);
 
   const [sessionMode, setSessionMode] =
     useState<CheckInSessionMode>('morning');

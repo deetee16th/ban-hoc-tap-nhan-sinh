@@ -41,8 +41,9 @@ export interface UserAccount {
   password: string;
   displayName: string;
   role: AccountRole;
-  assignedGroup: GroupId | null;
+  group_id: number | null;
   groupId?: number | string | null;
+  assignedGroup: GroupId | null;
 }
 
 export function normalizeGroupId(
@@ -71,6 +72,25 @@ export function normalizeGroupId(
   }
 
   return null;
+}
+
+export function normalizeNumericGroupId(
+  raw: unknown,
+  fallbackUsername?: string | null
+): number | null {
+  const groupCode = normalizeGroupId(raw, fallbackUsername);
+  switch (groupCode) {
+    case 'G1':
+      return 1;
+    case 'G2':
+      return 2;
+    case 'G3':
+      return 3;
+    case 'G4':
+      return 4;
+    default:
+      return null;
+  }
 }
 
 export function normalizeAccountRole(
