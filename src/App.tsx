@@ -527,6 +527,7 @@ export function App() {
               accounts={accounts}
               uiSettings={uiSettings}
               selectedWeek={selectedWeek}
+              isAdmin={authLevel === 'admin'}
               onSelectWeek={setSelectedWeek}
               onSaveMember={handleSaveMember}
               onDeleteMember={handleDeleteMember}

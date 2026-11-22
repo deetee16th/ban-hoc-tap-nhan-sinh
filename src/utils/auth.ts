@@ -8,15 +8,18 @@ export function getAuthLevel(account: UserAccount | null): AuthLevel {
 export function getAllowedTabs(level: AuthLevel): TabId[] {
   switch (level) {
     case 'admin':
-      return ['dashboard', 'checkin', 'insights', 'admin'];
     case 'banhoctap':
-      return ['dashboard', 'checkin', 'insights'];
+      return ['dashboard', 'checkin', 'insights', 'admin'];
     case 'group_officer':
       return ['dashboard', 'checkin'];
     case 'guest':
     default:
       return ['dashboard'];
   }
+}
+
+export function canManageAccounts(level: AuthLevel): boolean {
+  return level === 'admin';
 }
 
 export function canAccessAllGroups(level: AuthLevel): boolean {
